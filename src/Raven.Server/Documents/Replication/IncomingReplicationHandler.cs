@@ -1341,6 +1341,9 @@ namespace Raven.Server.Documents.Replication
                                     // the other side will receive negative ack and will retry sending again.
                                     document = item.Document;
 
+                                    if (item.Id.Contains("make/this/fail"))
+                                        throw new Exception("made this fail");
+
                                     try
                                     {
                                         AssertAttachmentsFromReplication(context, item.Id, document);

@@ -23,7 +23,7 @@ namespace Tryouts
         public static async Task Main(string[] args)
         {
             Console.WriteLine(Process.GetCurrentProcess().Id);
-            for (int i = 0; i < 1230; i++)
+            for (int i = 0; i < 1; i++)
             {
                 var sp = Stopwatch.StartNew();
                 Console.WriteLine($"Starting to run {i}");
@@ -31,9 +31,9 @@ namespace Tryouts
                 try
                 {
                     using (var testOutputHelper = new ConsoleTestOutputHelper())
-                    using (var test = new ClusterDatabaseMaintenance(testOutputHelper))
+                    using (var test = new RavenDB_17126(testOutputHelper))
                     {
-                        await test.ReshuffleAfterPromotion();
+                        await test.CheckRetryTimeGrowsOnReplicationError();
                     }
                 }
                 catch (Exception e)

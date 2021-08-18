@@ -1590,6 +1590,7 @@ namespace Raven.Server.Documents.Replication
                 NextTimeout *= 2;
                 NextTimeout = TimeSpan.FromMilliseconds(Math.Min(NextTimeout.TotalMilliseconds, MaxConnectionTimeout));
                 RetryOn = DateTime.UtcNow + NextTimeout;
+                Console.WriteLine("RetryOn: "+RetryOn);
             }
         }
 
