@@ -225,6 +225,13 @@ namespace SlowTests.Server.Replication
                 {
                     TaskId = saveResult.TaskId
                 }));
+                
+                if (WaitForDocument(sink, "users/2", timeout) == false)
+                {
+                    Console.WriteLine("error");
+                    //Debugger.Launch();
+                    WaitForUserToContinueTheTest(sink);
+                }
                 Assert.True(WaitForDocument(sink, "users/2", timeout), sink.Identifier);
             }
         }
