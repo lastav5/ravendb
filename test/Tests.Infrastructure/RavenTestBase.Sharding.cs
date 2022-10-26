@@ -24,11 +24,9 @@ using Raven.Client.ServerWide.Sharding;
 using Raven.Client.Util;
 using Raven.Server;
 using Raven.Server.Documents;
-using Raven.Server.Documents.PeriodicBackup;
+using Raven.Server.Documents.Sharding;
 using Raven.Server.Documents.Sharding.Handlers;
 using Raven.Server.Documents.Sharding.Handlers.Processors.OngoingTasks;
-using Raven.Server.Documents.Sharding;
-using Raven.Server.Json;
 using Raven.Server.ServerWide.Context;
 using Raven.Server.Utils;
 using Raven.Server.Web;
@@ -81,7 +79,7 @@ public partial class RavenTestBase
             return _parent.GetDocumentStore(shardedOptions, caller);
         }
 
-        public Options GetOptionsForCluster(RavenServer leader, int shards, int shardReplicationFactor, int orchestratorReplicationFactor)
+        public Options GetOptionsForCluster(RavenServer leader, int shards, int shardReplicationFactor, int orchestratorReplicationFactor, bool dynamicNodeDistribution = false)
         {
             var options = new Options
             {
@@ -94,6 +92,7 @@ public partial class RavenTestBase
                         {
                             Topology = new OrchestratorTopology
                             {
+                                DynamicNodesDistribution = dynamicNodeDistribution,
                                 ReplicationFactor = orchestratorReplicationFactor
                             }
                         }
