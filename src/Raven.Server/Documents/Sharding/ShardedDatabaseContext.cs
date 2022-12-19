@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Raven.Client;
 using Raven.Client.Extensions;
@@ -107,6 +108,34 @@ namespace Raven.Server.Documents.Sharding
             Interlocked.Exchange(ref _record, record);
 
             RachisLogIndexNotifications.NotifyListenersAbout(index, e: null);
+        }
+
+        private bool AreElementsEqual(List<string> list1, List<string> list2)
+        {
+            if (list1.Count != list2.Count)
+                return false;
+
+            foreach (var item in list1)
+            {
+                if (list2.Contains(item) == false)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private bool AreDictionaryKeysEqual(Dictionary<int, DatabaseTopology> dict1, Dictionary<int, DatabaseTopology> dict2)
+        {
+            if (dict1.Count != dict2.Count)
+                return false;
+
+            foreach (var item in dict1)
+            {
+                if (dict2.ContainsKey(item.Key) == false)
+                    return false;
+            }
+
+            return true;
         }
 
         public string DatabaseName => _record.DatabaseName;
