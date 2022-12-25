@@ -18,6 +18,7 @@ using Raven.Client.Documents.Operations.ETL;
 using Raven.Client.Documents.Operations.Replication;
 using Raven.Client.Documents.Operations.Revisions;
 using Raven.Client.Documents.Session;
+using Raven.Client.Exceptions;
 using Raven.Client.ServerWide.Operations;
 using Raven.Client.ServerWide.Sharding;
 using Raven.Server.Documents;
@@ -402,6 +403,110 @@ namespace SlowTests.Sharding.Cluster
             }
         }
 
+
+        [RavenFact(RavenTestCategory.Cluster | RavenTestCategory.Sharding)]
+        public async Task EnsureCantDeleteShardFromDatabaseWhileItHasBuckets()
+        {
+            var (nodes, leader) = await CreateRaftCluster(3, watcherCluster: true);
+            var options = Sharding.GetOptionsForCluster(leader, shards: 3, shardReplicationFactor: 2, orchestratorReplicationFactor: 2);
+
+            using (var store = GetDocumentStore(options))
+            {
+                //add doc to some shard to ensure it has a bucket
+                using (var session = store.OpenSession())
+                {
+                    session.Store(new User(), "users/1");
+                    session.SaveChanges();
+                }
+
+                var shardToDelete = await Sharding.GetShardNumber(store, "users/1");
+
+                var record = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                var nodesContainingNewShard = record.Sharding.Shards[shardToDelete].Members;
+
+                //try to delete shard while it has bucket ranges mapping
+
+                var deleteShardDatabaseRes = store.Maintenance.Server.Send(new DeleteDatabasesOperation(store.Database, shardToDelete, hardDelete: true, fromNode: nodesContainingNewShard[0]));
+                await Cluster.WaitForRaftIndexToBeAppliedInClusterAsync(deleteShardDatabaseRes.RaftCommandIndex);
+
+                var error = await ThrowsAsync<RavenException>(async () =>
+                {
+                    //delete shard's databases all on all nodes
+                    deleteShardDatabaseRes = store.Maintenance.Server.Send(new DeleteDatabasesOperation(store.Database, shardToDelete, hardDelete: true, fromNode: nodesContainingNewShard[1]));
+                    await Cluster.WaitForRaftIndexToBeAppliedInClusterAsync(deleteShardDatabaseRes.RaftCommandIndex);
+                });
+                Contains($"it still contains buckets", error.Message);
+            }
+        }
+
+        [RavenFact(RavenTestCategory.Cluster | RavenTestCategory.Sharding)]
+        public async Task AddAndDeleteShardFromDatabase_ShardHasNoBucketsMapping()
+        {
+            var (nodes, leader) = await CreateRaftCluster(3, watcherCluster: true);
+            var options = Sharding.GetOptionsForCluster(leader, shards: 2, shardReplicationFactor: 2, orchestratorReplicationFactor: 2);
+
+            using (var store = GetDocumentStore(options))
+            {
+                //add new shard - it will have no buckets mapping
+                var addShardRes = store.Maintenance.Server.Send(new AddDatabaseShardOperation(store.Database));
+                await Cluster.WaitForRaftIndexToBeAppliedInClusterAsync(addShardRes.RaftCommandIndex);
+
+                var nodesContainingNewShard = addShardRes.ShardTopology.Members;
+
+                //delete shard's databases all on all nodes
+                foreach (var node in nodesContainingNewShard)
+                {
+                    var deleteShardDatabaseRes = store.Maintenance.Server.Send(new DeleteDatabasesOperation(store.Database, addShardRes.ShardNumber, hardDelete: true, fromNode: node));
+                    await Cluster.WaitForRaftIndexToBeAppliedInClusterAsync(deleteShardDatabaseRes.RaftCommandIndex);
+                }
+                
+                var record = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                Equal(2, record.Sharding.Shards.Count);
+                
+                //make sure the nodes that held the deleted shard no longer have any of this shard's db instances
+                foreach (var node in nodesContainingNewShard)
+                {
+                    var serverWithNewShard = Servers.Single(x => x.ServerStore.NodeTag == node);
+                    False(serverWithNewShard.ServerStore.DatabasesLandlord.DatabasesCache.TryGetValue(ShardHelper.ToShardName(store.Database, addShardRes.ShardNumber), out _));
+                }
+            }
+        }
+
+        [RavenFact(RavenTestCategory.Cluster | RavenTestCategory.Sharding)]
+        public async Task DeletingAllShardsDatabasesShouldDeleteShardedDatabase()
+        {
+            var (nodes, leader) = await CreateRaftCluster(3, watcherCluster: true);
+            var options = Sharding.GetOptionsForCluster(leader, shards: 2, shardReplicationFactor: 2, orchestratorReplicationFactor: 2);
+
+            using (var store = GetDocumentStore(options))
+            {
+                var record = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                
+                //delete shard's databases all on all nodes
+                foreach (var (shardNumber, topology) in record.Sharding.Shards)
+                {
+                    foreach (var node in topology.Members)
+                    {
+                        var deleteShardDatabaseRes = store.Maintenance.Server.Send(new DeleteDatabasesOperation(store.Database, shardNumber, hardDelete: true, fromNode: node));
+                        await Cluster.WaitForRaftIndexToBeAppliedInClusterAsync(deleteShardDatabaseRes.RaftCommandIndex);
+                    }
+                }
+                
+                Null(await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database)));
+                
+                //make sure the nodes that held the deleted shard no longer have any of this shard's db instances
+                foreach (var (shardNumber, topology) in record.Sharding.Shards)
+                {
+                    foreach (var node in topology.Members)
+                    {
+                        var serverWithNewShard = Servers.Single(x => x.ServerStore.NodeTag == node);
+                        False(serverWithNewShard.ServerStore.DatabasesLandlord.DatabasesCache.TryGetValue(
+                            ShardHelper.ToShardName(store.Database, shardNumber), out _));
+                    }
+                }
+            }
+        }
+        
         [RavenFact(RavenTestCategory.Sharding)]
         public async Task CanMoveBucketWhileWriting()
         {
