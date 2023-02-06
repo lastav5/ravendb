@@ -33,7 +33,8 @@ public class RabbitMqEtl : QueueEtl<RabbitMqItem>
         return new RabbitMqDocumentTransformer<RabbitMqItem>(Transformation, Database, context, Configuration);
     }
 
-    protected override int PublishMessages(List<QueueWithItems<RabbitMqItem>> itemsPerExchange, BlittableJsonEventBinaryFormatter formatter, out List<string> idsToDelete)
+    protected override int PublishMessages(DocumentsOperationContext documentsOperationContext, List<QueueWithItems<RabbitMqItem>> itemsPerExchange,
+        BlittableJsonEventBinaryFormatter formatter, out List<string> idsToDelete)
     {
         if (itemsPerExchange.Count == 0)
         {
@@ -71,7 +72,7 @@ public class RabbitMqEtl : QueueEtl<RabbitMqItem>
 
                 properties.Headers = new Dictionary<string, object>();
 
-                var cloudEvent = CreateCloudEvent(queueItem);
+                var cloudEvent = CreateCloudEvent(documentsOperationContext, queueItem);
 
                 var rabbitMqMessage = cloudEvent.ToAmqpMessage(ContentMode.Binary, formatter);
 

@@ -27,7 +27,8 @@ public class KafkaEtl : QueueEtl<KafkaItem>
         return new KafkaDocumentTransformer<KafkaItem>(Transformation, Database, context, Configuration);
     }
 
-    protected override int PublishMessages(List<QueueWithItems<KafkaItem>> itemsPerTopic, BlittableJsonEventBinaryFormatter formatter, out List<string> idsToDelete)
+    protected override int PublishMessages(DocumentsOperationContext documentsOperationContext, List<QueueWithItems<KafkaItem>> itemsPerTopic,
+        BlittableJsonEventBinaryFormatter formatter, out List<string> idsToDelete)
     {
         if (itemsPerTopic.Count == 0)
         {
@@ -41,9 +42,18 @@ public class KafkaEtl : QueueEtl<KafkaItem>
 
         if (_producer == null)
         {
-            var producer = QueueBrokerConnectionHelper.CreateKafkaProducer(Configuration.Connection.KafkaConnectionSettings, TransactionalId, Logger, Name,
-                Database.ServerStore.Server.Certificate);
-
+            IProducer<string, byte[]> producer = null;
+            try
+            {
+                 producer = QueueBrokerConnectionHelper.CreateKafkaProducer(Configuration.Connection.KafkaConnectionSettings, TransactionalId, Logger, Name,
+                    Database.ServerStore.Server.Certificate);
+                
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
             try
             {
                 producer.InitTransactions(TimeSpan.FromSeconds(60));
@@ -98,11 +108,12 @@ public class KafkaEtl : QueueEtl<KafkaItem>
             {
                 foreach (var queueItem in topic.Items)
                 {
-                    var cloudEvent = CreateCloudEvent(queueItem);
+                    var cloudEvent = CreateCloudEvent(documentsOperationContext, queueItem);
 
                     var kafkaMessage = cloudEvent.ToKafkaMessage(ContentMode.Binary, formatter);
-
+                    
                     _producer.Produce(topic.Name, kafkaMessage, ReportHandler);
+                    Console.WriteLine($"{Database.Name}: Produced message: topic name: {topic.Name}. msg key: {kafkaMessage.Key} value {kafkaMessage.Value}");
 
                     if (topic.DeleteProcessedDocuments)
                         idsToDelete.Add(queueItem.DocumentId);

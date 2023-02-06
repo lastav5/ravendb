@@ -110,6 +110,22 @@ namespace SlowTests.Server.Documents.ETL
             return (_src, dest, result);
         }
 
+        protected ManualResetEventSlim WaitForEtl(string databaseName, Func<string, EtlProcessStatistics, bool> predicate)
+        {
+            var database = GetDatabase(databaseName).Result;
+
+            var mre = new ManualResetEventSlim();
+
+            database.EtlLoader.BatchCompleted += x =>
+            {
+                if (predicate($"{x.ConfigurationName}/{x.TransformationName}", x.Statistics))
+                    mre.Set();
+            };
+
+
+            return mre;
+        }
+
         protected ManualResetEventSlim WaitForEtl(DocumentStore store, Func<string, EtlProcessStatistics, bool> predicate)
         {
             var database = GetDatabase(store.Database).Result;

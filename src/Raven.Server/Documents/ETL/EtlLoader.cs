@@ -55,6 +55,7 @@ namespace Raven.Server.Documents.ETL
 
         public EtlLoader(DocumentDatabase database, ServerStore serverStore)
         {
+            Console.WriteLine($"Created etl loader for {database.Name}");
             Logger = LoggingSource.Instance.GetLogger(database.Name, GetType().FullName);
 
             _database = database;

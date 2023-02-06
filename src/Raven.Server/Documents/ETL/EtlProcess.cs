@@ -31,6 +31,7 @@ using Raven.Server.Documents.ETL.Providers.SQL;
 using Raven.Server.Documents.ETL.Providers.SQL.RelationalWriters;
 using Raven.Server.Documents.ETL.Stats;
 using Raven.Server.Documents.ETL.Test;
+using Raven.Server.Documents.Replication;
 using Raven.Server.Documents.Replication.ReplicationItems;
 using Raven.Server.Documents.TimeSeries;
 using Raven.Server.NotificationCenter.Notifications;
@@ -109,7 +110,9 @@ namespace Raven.Server.Documents.ETL
 
                 if (stateBlittable != null)
                 {
-                    return JsonDeserializationClient.EtlProcessState(stateBlittable);
+                    var state = JsonDeserializationClient.EtlProcessState(stateBlittable);
+                    Console.WriteLine($"{database.Name}: Got cluster process state: {state.ChangeVector}");
+                    return state;
                 }
 
                 return new EtlProcessState();
@@ -329,7 +332,7 @@ namespace Raven.Server.Documents.ETL
 
                     if (item.Filtered)
                     {
-                        stats.RecordChangeVector(item.ChangeVector);
+                        stats.RecordChangeVector(context, item.ChangeVector);
                         stats.RecordLastFilteredOutEtag(item.Etag, item.Type);
 
                         item.Dispose();
@@ -341,9 +344,9 @@ namespace Raven.Server.Documents.ETL
 
                     CancellationToken.ThrowIfCancellationRequested();
 
-                    if (AlreadyLoadedByDifferentNode(item, state))
+                    if (AlreadyLoadedByDifferentNode(context, item, state, Database.Name))
                     {
-                        stats.RecordChangeVector(item.ChangeVector);
+                        stats.RecordChangeVector(context, item.ChangeVector);
                         stats.RecordLastFilteredOutEtag(item.Etag, item.Type);
 
                         item.Dispose();
@@ -365,7 +368,7 @@ namespace Raven.Server.Documents.ETL
                         CollectionName.IsHiLoCollection(item.CollectionFromMetadata) &&
                         ShouldFilterOutHiLoDocument())
                     {
-                        stats.RecordChangeVector(item.ChangeVector);
+                        stats.RecordChangeVector(context, item.ChangeVector);
                         stats.RecordLastFilteredOutEtag(item.Etag, item.Type);
 
                         item.Dispose();
@@ -383,7 +386,7 @@ namespace Raven.Server.Documents.ETL
 
                             stats.RecordTransformedItem(item.Type, item.IsDelete);
                             stats.RecordLastTransformedEtag(item.Etag, item.Type);
-                            stats.RecordChangeVector(item.ChangeVector);
+                            stats.RecordChangeVector(context, item.ChangeVector);
 
                             batchSize++;
 
@@ -752,7 +755,7 @@ namespace Raven.Server.Documents.ETL
                     var startEtag = state.GetLastProcessedEtag(Database.DbBase64Id, _serverStore.NodeTag);
 
                     using (Statistics.NewBatch())
-                    using (Database.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context))
+                    using (Database.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context)) //TODO stav: allocate outside the loop?
                     {
                         var statsAggregator = new EtlStatsAggregator<TStatsScope, TEtlPerformanceOperation>(Interlocked.Increment(ref _statsId), CreateScope, _lastStats);
                         _lastStats = statsAggregator;
@@ -816,26 +819,28 @@ namespace Raven.Server.Documents.ETL
                         }
 
                         statsAggregator.Complete();
-                    }
 
-                    if (didWork)
-                    {
-                        try
+
+                        if (didWork)
                         {
-                            UpdateEtlProcessState(state);
-                            Database.EtlLoader.OnBatchCompleted(ConfigurationName, TransformationName, Statistics);
-                        }
-                        catch (Exception e)
-                        {
-                            if (CancellationToken.IsCancellationRequested == false)
+                            try
                             {
-                                if (Logger.IsOperationsEnabled) 
-                                    Logger.Operations($"{Tag} Failed to update state of ETL process '{Name}'", e);
+                                UpdateEtlProcessState(context, state);
+                                Database.EtlLoader.OnBatchCompleted(ConfigurationName, TransformationName, Statistics);
                             }
-                        }
+                            catch (Exception e)
+                            {
+                                if (CancellationToken.IsCancellationRequested == false)
+                                {
+                                    if (Logger.IsOperationsEnabled)
+                                        Logger.Operations($"{Tag} Failed to update state of ETL process '{Name}'", e);
+                                }
+                            }
 
-                        continue;
+                            continue;
+                        }
                     }
+
                     try
                     {
                         AfterAllBatchesCompleted(runStart);
@@ -902,11 +907,26 @@ namespace Raven.Server.Documents.ETL
             stats.RecordBatchStopReason(message);
         }
 
-        protected void UpdateEtlProcessState(EtlProcessState state, DateTime? lastBatchTime = null)
+        protected void UpdateEtlProcessState(EtlProcessState state, DateTime? lastBatchTime = null) //TODO stav: delete
         {
-            var command = new UpdateEtlProcessStateCommand(Database.Name, Configuration.Name, Transformation.Name, Statistics.LastProcessedEtag,
+            var command = new UpdateEtlProcessStateCommand(Database.Name, Configuration.Name, Transformation.Name, Statistics.LastProcessedEtag, //TODO stav: cv update in state
                 ChangeVectorUtils.MergeVectors(Statistics.LastChangeVector, state.ChangeVector), _serverStore.NodeTag,
                 _serverStore.LicenseManager.HasHighlyAvailableTasks(), Database.DbBase64Id, RaftIdGenerator.NewId(), state.SkippedTimeSeriesDocs, lastBatchTime);
+
+            var sendToLeaderTask = _serverStore.SendToLeaderAsync(command);
+
+            sendToLeaderTask.Wait(CancellationToken);
+            var (etag, _) = sendToLeaderTask.Result;
+
+            Database.RachisLogIndexNotifications.WaitForIndexNotification(etag, _serverStore.Engine.OperationTimeout).Wait(CancellationToken);
+        }
+
+        protected void UpdateEtlProcessState(DocumentsOperationContext context, EtlProcessState state, DateTime? lastBatchTime = null)
+        {
+            var merged = Utils.ChangeVector.Merge(context.GetChangeVector(Statistics.LastChangeVector), context.GetChangeVector(state.ChangeVector), context);
+            var command = new UpdateEtlProcessStateCommand(Database.Name, Configuration.Name, Transformation.Name, Statistics.LastProcessedEtag, //TODO stav: cv update in state
+            merged, _serverStore.NodeTag,
+            _serverStore.LicenseManager.HasHighlyAvailableTasks(), Database.DbBase64Id, RaftIdGenerator.NewId(), state.SkippedTimeSeriesDocs, lastBatchTime);
 
             var sendToLeaderTask = _serverStore.SendToLeaderAsync(command);
 
@@ -949,12 +969,13 @@ namespace Raven.Server.Documents.ETL
         {
         }
 
-        private static bool AlreadyLoadedByDifferentNode(ExtractedItem item, EtlProcessState state)
+        private static bool AlreadyLoadedByDifferentNode(DocumentsOperationContext context, ExtractedItem item, EtlProcessState state, string db)
         {
-            var conflictStatus = ChangeVectorUtils.GetConflictStatus(
-                remoteAsString: item.ChangeVector,
-                localAsString: state.ChangeVector);
-
+            var conflictStatus = ChangeVectorUtils.GetConflictStatus( //TODO stav: will affect all etls
+                new ChangeVector(item.ChangeVector, context),
+                new ChangeVector(state.ChangeVector, context),
+                mode: ChangeVectorMode.Order); //TODO stav: need to take into account Order as well?
+            Console.WriteLine($"{db}: Conflict status for item {item.ChangeVector} and state {state.ChangeVector} is {conflictStatus}");
             return conflictStatus == ConflictStatus.AlreadyMerged;
         }
 

@@ -8,6 +8,7 @@ using RachisTests.DatabaseCluster;
 using Raven.Server.Utils;
 using SlowTests.Cluster;
 using SlowTests.Issues;
+using SlowTests.Server.Documents.ETL.Queue;
 using SlowTests.Sharding.Cluster;
 
 namespace Tryouts;
@@ -23,16 +24,16 @@ public static class Program
     {
         Console.WriteLine(Process.GetCurrentProcess().Id);
 
-        for (int i = 0; i < 100; i++)
+        for (int i = 0; i < 1; i++)
         {
             Console.WriteLine($"Starting to run {i}");
             try
             {
                 using (var testOutputHelper = new ConsoleTestOutputHelper())
-                using (var test = new ReshardingTests(testOutputHelper))
+                using (var test = new ShardedKafkaEtlTests(testOutputHelper))
                 {
                     DebuggerAttachedTimeout.DisableLongTimespan = true;
-                    await test.GetDocuments2();
+                    await test.EnsureKafkaDoesNotProcessSameDocTwiceSameId();
                 }
             }
             catch (Exception e)

@@ -18,6 +18,7 @@ using Raven.Server.Documents.TransactionCommands;
 using Raven.Server.Exceptions.ETL.QueueEtl;
 using Raven.Server.ServerWide;
 using Raven.Server.ServerWide.Context;
+using Raven.Server.Utils;
 
 namespace Raven.Server.Documents.ETL.Providers.Queue;
 
@@ -49,6 +50,8 @@ public abstract class QueueEtl<T> : EtlProcess<QueueItem, QueueWithItems<T>, Que
     private const string DefaultCloudEventType = "ravendb.etl.put";
     private string DefaultCloudEventSource =>
         $"{Database.Configuration.Core.PublicServerUrl?.UriValue ?? Database.ServerStore.Server.WebUrl}/{Database.Name}/{Name}";
+    private string ShardedDefaultCloudEventSource =>
+        $"{Database.Configuration.Core.PublicServerUrl?.UriValue ?? Database.ServerStore.Server.WebUrl}/{ShardHelper.ToDatabaseName(Database.Name)}";
 
     public override string EtlSubType => Configuration.BrokerType.ToString();
 
@@ -104,7 +107,7 @@ public abstract class QueueEtl<T> : EtlProcess<QueueItem, QueueWithItems<T>, Que
     {
         using (var formatter = new BlittableJsonEventBinaryFormatter(context))
         {
-            var count = PublishMessages(items.ToList(), formatter, out var idsToDelete);
+            var count = PublishMessages(context, items.ToList(), formatter, out var idsToDelete);
 
             if (idsToDelete is {Count: > 0})
             {
@@ -124,21 +127,24 @@ public abstract class QueueEtl<T> : EtlProcess<QueueItem, QueueWithItems<T>, Que
         }
     }
 
-    protected abstract int PublishMessages(List<QueueWithItems<T>> items, BlittableJsonEventBinaryFormatter formatter, out List<string> idsToDelete);
+    protected abstract int PublishMessages(DocumentsOperationContext documentsOperationContext, List<QueueWithItems<T>> items,
+        BlittableJsonEventBinaryFormatter formatter, out List<string> idsToDelete);
 
     protected override EtlStatsScope CreateScope(EtlRunStats stats)
     {
         return new EtlStatsScope(stats);
     }
 
-    protected CloudEvent CreateCloudEvent(QueueItem item)
+    protected CloudEvent CreateCloudEvent(DocumentsOperationContext context, QueueItem item)
     {
+        var cv = context.GetChangeVector(item.ChangeVector).Version.ToString();
         var eventMessage = new CloudEvent
         {
-            Id = item.Attributes?.Id ?? item.ChangeVector,
+            Id = item.Attributes?.Id ?? cv,
             DataContentType = "application/json",
             Type = item.Attributes?.Type ?? DefaultCloudEventType,
-            Source = new Uri(item.Attributes?.Source ?? DefaultCloudEventSource, UriKind.RelativeOrAbsolute),
+            //Source = new Uri(item.Attributes?.Source ?? DefaultCloudEventSource, UriKind.RelativeOrAbsolute),
+            Source = new Uri(ShardedDefaultCloudEventSource, UriKind.RelativeOrAbsolute),
             Data = item.TransformationResult
         };
 
