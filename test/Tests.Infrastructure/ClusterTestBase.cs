@@ -136,7 +136,7 @@ namespace Tests.Infrastructure
             Assert.NotNull(await WaitForDocumentToReplicateAsync<object>(dst, id, 15 * 1000));
         }
 
-        protected static async Task<T> WaitForDocumentToReplicateAsync<T>(IDocumentStore store, string id, int timeout)
+        public static async Task<T> WaitForDocumentToReplicateAsync<T>(IDocumentStore store, string id, int timeout)
             where T : class
         {
             var sw = Stopwatch.StartNew();

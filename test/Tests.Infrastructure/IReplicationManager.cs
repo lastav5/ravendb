@@ -9,5 +9,7 @@ namespace Tests.Infrastructure
         public void Mend();
         public void ReplicateOnce(string docId);
         public Task EnsureNoReplicationLoopAsync();
+        public Task EnsureReplicatingAsync(string markerId = null);
+        public Task EnsureReplicatingForDocIdAsync(string docId);
     }
 }

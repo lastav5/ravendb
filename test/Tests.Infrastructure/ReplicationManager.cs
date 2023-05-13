@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Raven.Server;
 using Tests.Infrastructure;
@@ -11,7 +12,7 @@ public partial class RavenTestBase
     {
         public readonly string DatabaseName;
         public readonly Dictionary<string, ReplicationInstance> Instances;
-
+        
         public ReplicationManager(string databaseName, Dictionary<string, ReplicationInstance> instances)
         {
             DatabaseName = databaseName;
@@ -40,6 +41,16 @@ public partial class RavenTestBase
             {
                 replicationInstance.ReplicateOnce(docId);
             }
+        }
+
+        public Task EnsureReplicatingAsync(string markerId = null)
+        {
+            return Instances.First().Value.EnsureReplicatingAsync(markerId);
+        }
+
+        public Task EnsureReplicatingForDocIdAsync(string docId)
+        {
+            return EnsureReplicatingAsync(docId);
         }
 
         public async Task EnsureNoReplicationLoopAsync()

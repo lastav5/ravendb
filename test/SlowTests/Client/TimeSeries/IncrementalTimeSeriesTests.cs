@@ -166,8 +166,8 @@ namespace SlowTests.Client.TimeSeries
                     session.SaveChanges();
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -232,8 +232,8 @@ namespace SlowTests.Client.TimeSeries
                     }
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -722,8 +722,8 @@ namespace SlowTests.Client.TimeSeries
                     }
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -816,8 +816,8 @@ namespace SlowTests.Client.TimeSeries
                     }
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -916,10 +916,10 @@ namespace SlowTests.Client.TimeSeries
                     }
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
                 await EnsureReplicatingAsync(storeA, storeB);
 
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
                 await EnsureReplicatingAsync(storeB, storeA);
 
                 await replicationA.EnsureNoReplicationLoopAsync();
@@ -1273,8 +1273,8 @@ namespace SlowTests.Client.TimeSeries
                     session.SaveChanges();
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -1348,8 +1348,8 @@ namespace SlowTests.Client.TimeSeries
                     session.SaveChanges();
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -1462,8 +1462,8 @@ namespace SlowTests.Client.TimeSeries
                     session.SaveChanges();
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -1531,8 +1531,8 @@ namespace SlowTests.Client.TimeSeries
                     session.SaveChanges();
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);
@@ -1627,8 +1627,8 @@ namespace SlowTests.Client.TimeSeries
                     session.SaveChanges();
                 }
 
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
 
                 await EnsureReplicatingAsync(storeA, storeB);
                 await EnsureReplicatingAsync(storeB, storeA);

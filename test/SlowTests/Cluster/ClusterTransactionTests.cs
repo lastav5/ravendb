@@ -380,7 +380,7 @@ namespace SlowTests.Cluster
                     session.Advanced.SetTransactionMode(TransactionMode.ClusterWide);
                     var user = (await session.Advanced.ClusterTransaction.GetCompareExchangeValueAsync<User>("usernames/ayende")).Value;
                     Assert.Equal(user2.Name, user.Name);
-                    WaitForUserToContinueTheTest(store);
+                    
                     user = await session.LoadAsync<User>("foo/bar");
                     Assert.Equal(user3.Name, user.Name);
                 }
@@ -452,7 +452,7 @@ namespace SlowTests.Cluster
             }
         }
 
-        [RavenTheory(RavenTestCategory.ClusterTransactions)]
+        [RavenTheory(RavenTestCategory.ClusterTransactions | RavenTestCategory.Replication)]
         [RavenData(DatabaseMode = RavenDatabaseMode.All)]
         public async Task ResolveInFavorOfClusterTransaction(Options options)
         {
@@ -1266,7 +1266,7 @@ namespace SlowTests.Cluster
             }
         }
 
-        [RavenTheory(RavenTestCategory.ClusterTransactions)]
+        [RavenTheory(RavenTestCategory.ClusterTransactions | RavenTestCategory.Replication)]
         [RavenData(DatabaseMode = RavenDatabaseMode.All)]
         public async Task ClusterTransactionConflict(Options options)
         {
@@ -1297,10 +1297,11 @@ namespace SlowTests.Cluster
                     await session.SaveChangesAsync();
                 }
 
-                await Task.WhenAll(SetupReplicationAsync(store1, store2), SetupReplicationAsync(store2, store1));
+                var replication1 = await SetupReplicationAndGetManagerAsync(store1, store2, options.DatabaseMode);
+                var replication2 = await SetupReplicationAndGetManagerAsync(store2, store1, options.DatabaseMode);
 
-                await EnsureReplicatingAsync(store1, store2);
-                await EnsureReplicatingAsync(store2, store1);
+                await replication1.EnsureReplicatingAsync(store2);
+                await replication2.EnsureReplicatingAsync(store1);
 
                 using (var session = store1.OpenAsyncSession(new SessionOptions
                 {
@@ -1320,17 +1321,8 @@ namespace SlowTests.Cluster
                     Assert.Equal("Grisha", u.Name);
                 }
 
-                Task t1, t2;
-                if (options.DatabaseMode == RavenDatabaseMode.Sharded)
-                {
-                    t1 = ShardingCluster.EnsureNoReplicationLoopForSharding(Server, store1.Database);
-                    t2 = ShardingCluster.EnsureNoReplicationLoopForSharding(Server, store2.Database);
-                }
-                else
-                {
-                    t1 = EnsureNoReplicationLoop(Server, store1.Database);
-                    t2 = EnsureNoReplicationLoop(Server, store2.Database);
-                }
+                var t1 = replication1.EnsureNoReplicationLoopAsync();
+                var t2 = replication2.EnsureNoReplicationLoopAsync();
                 
                 await Task.WhenAll(t1, t2);
                 await t1;

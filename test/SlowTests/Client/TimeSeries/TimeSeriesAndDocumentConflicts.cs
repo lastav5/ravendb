@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using FastTests;
-using FastTests.Server.Replication;
 using Raven.Client;
 using Raven.Client.Documents.Operations.TimeSeries;
 using Raven.Client.ServerWide;
@@ -23,13 +22,14 @@ namespace SlowTests.Client.TimeSeries
 
         // RavenDB-15108
 
-        [RavenFact(RavenTestCategory.TimeSeries)]
-        public async Task TimeSeriesConflictsInMetadata()
+        [RavenTheory(RavenTestCategory.TimeSeries | RavenTestCategory.Replication)]
+        [RavenData(DatabaseMode = RavenDatabaseMode.All)]
+        public async Task TimeSeriesConflictsInMetadata(Options options)
         {
-            using (var storeA = GetDocumentStore())
-            using (var storeB = GetDocumentStore())
+            using (var storeA = GetDocumentStore(options))
+            using (var storeB = GetDocumentStore(options))
             {
-                await SetupReplicationAsync(storeA, storeB);
+                var replication = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
 
                 using (var session = storeA.OpenAsyncSession())
                 {
@@ -40,7 +40,7 @@ namespace SlowTests.Client.TimeSeries
                     await session.SaveChangesAsync();
                 }
 
-                EnsureReplicating(storeA, storeB);
+                await replication.EnsureReplicatingForDocIdAsync(storeB, "users/1-A");
 
                 using (var session = storeB.OpenSession())
                 {
@@ -56,7 +56,7 @@ namespace SlowTests.Client.TimeSeries
                     session.SaveChanges();
                 }
 
-                EnsureReplicating(storeA, storeB);
+                await replication.EnsureReplicatingForDocIdAsync(storeB, "users/1-A");
 
                 var val = storeB.Operations
                     .Send(new GetTimeSeriesOperation("users/1-A", "HeartRate"))

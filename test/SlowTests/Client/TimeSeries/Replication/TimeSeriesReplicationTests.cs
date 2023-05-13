@@ -983,8 +983,8 @@ namespace SlowTests.Client.TimeSeries.Replication
                     session.SaveChanges();
                 }
                 
-                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, options.DatabaseMode, toStores: storeA);
-                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, options.DatabaseMode, toStores: storeB);
+                var replicationB = await SetupReplicationAndGetManagerAsync(storeB, storeA, options.DatabaseMode);
+                var replicationA = await SetupReplicationAndGetManagerAsync(storeA, storeB, options.DatabaseMode);
 
                 EnsureReplicating(storeA, storeB);
                 EnsureReplicating(storeB, storeA);

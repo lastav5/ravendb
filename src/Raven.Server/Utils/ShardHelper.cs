@@ -14,6 +14,7 @@ using Raven.Server.ServerWide.Sharding;
 using Sparrow;
 using Sparrow.Json;
 using Sparrow.Server;
+using Sparrow.Threading;
 using Sparrow.Utils;
 using Voron;
 
@@ -150,6 +151,12 @@ namespace Raven.Server.Utils
 
         public static int GetShardNumberFor<TTransaction>(ShardingConfiguration configuration, TransactionOperationContext<TTransaction> context, string id)
             where TTransaction : RavenTransaction => GetShardNumberFor(configuration, context.Allocator, id);
+
+        public static int GetShardNumberFor(ShardingConfiguration configuration, string id)
+        {
+            using (var allocator = new ByteStringContext(SharedMultipleUseFlag.None))
+                return GetShardNumberFor(configuration, allocator, id);
+        }
 
         public static int GetShardNumberFor<TTransaction>(RawShardingConfiguration configuration, TransactionOperationContext<TTransaction> context, string id)
             where TTransaction : RavenTransaction => GetShardNumberAndBucketFor(configuration, context, id).ShardNumber;

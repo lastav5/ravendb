@@ -39,13 +39,13 @@ namespace Tests.Infrastructure
         {
         }
 
-        public async ValueTask<IReplicationManager> GetReplicationManagerAsync(IDocumentStore store, string databaseName, RavenDatabaseMode mode, bool breakReplication = false, List<RavenServer> servers = null)
+        private async ValueTask<IReplicationManager> GetReplicationManagerAsync(IDocumentStore src, IDocumentStore dst, string databaseName, RavenDatabaseMode mode, bool breakReplication = false, List<RavenServer> servers = null)
         {
             if (mode == RavenDatabaseMode.Single)
-                return await  ReplicationManager.GetReplicationManagerAsync(servers ?? GetServers() , databaseName, breakReplication);
+                return await ReplicationManager.GetReplicationManagerAsync(servers ?? GetServers() , databaseName, breakReplication, src, dst);
 
-            return await ShardedReplicationTestBase.ShardedReplicationManager.GetShardedReplicationManager(await Sharding.GetShardingConfigurationAsync(store),
-                    servers ?? GetServers(), databaseName, breakReplication);
+            return await ShardedReplicationTestBase.ShardedReplicationManager.GetShardedReplicationManager(await Sharding.GetShardingConfigurationAsync(src),
+                    servers ?? GetServers(), databaseName, breakReplication, src, dst);
         }
 
         public async Task<ReplicationInstance> BreakReplication(Raven.Server.ServerWide.ServerStore from, string databaseName)
@@ -278,10 +278,10 @@ namespace Tests.Infrastructure
             return await store.Maintenance.Server.SendAsync(op);
         }
 
-        public async ValueTask<IReplicationManager> SetupReplicationAndGetManagerAsync(IDocumentStore fromStore, RavenDatabaseMode mode, bool breakReplication = false, List<RavenServer> servers = null, params IDocumentStore[] toStores)
+        public async ValueTask<IReplicationManager> SetupReplicationAndGetManagerAsync(IDocumentStore fromStore, IDocumentStore toStore, RavenDatabaseMode mode, bool breakReplication = false, List<RavenServer> servers = null)
         {
-            var replication = await GetReplicationManagerAsync(fromStore, fromStore.Database, mode, breakReplication, servers);
-            await SetupReplicationAsync(fromStore, responsibleNode: null, toStores);
+            var replication = await GetReplicationManagerAsync(fromStore, toStore, fromStore.Database, mode, breakReplication, servers);
+            await SetupReplicationAsync(fromStore, responsibleNode: null, toStore);
             return replication;
         }
 
