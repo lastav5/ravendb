@@ -17,10 +17,11 @@ namespace SlowTests.Tests
         {
         }
 
-        [RavenFact(RavenTestCategory.Subscriptions)]
-        public async Task BasicSusbscriptionTest()
+        [RavenTheory(RavenTestCategory.Subscriptions)]
+        [RavenData(DatabaseMode = RavenDatabaseMode.All)]
+        public async Task BasicSusbscriptionTest(Options options)
         {
-            using (var store = GetDocumentStore())
+            using (var store = GetDocumentStore(options))
             {
                 await CreateDocuments(store, 1);
 
