@@ -57,7 +57,7 @@ public sealed class ShardedChangesClientConnection : AbstractChangesClientConnec
 
     private readonly ShardedDatabaseContext _context;
     private readonly bool _throttleConnection;
-    private Dictionary<int, ShardedDatabaseChanges> _changes;
+    internal Dictionary<int, ShardedDatabaseChanges> _changes;
 
     private IDisposable _releaseQueueContext;
     private JsonOperationContext _queueContext;
@@ -70,14 +70,14 @@ public sealed class ShardedChangesClientConnection : AbstractChangesClientConnec
         _releaseQueueContext = ContextPool.AllocateOperationContext(out _queueContext);
     }
 
-    private async ValueTask EnsureConnectedAsync(CancellationToken token)
+    private async ValueTask EnsureConnectedAsync(CancellationToken token) //TODO stav: orchestrator EnsureConnectedNow
     {
         if (_changes != null)
             return;
 
         var tasks = new List<Task>(_context.ShardCount);
         _changes = new Dictionary<int, ShardedDatabaseChanges>();
-        foreach (var shardToTopology in _context.ShardsTopology)
+        foreach (var shardToTopology in _context.ShardsTopology)//TODO stav: node tag and dispose null here
         {
             _changes[shardToTopology.Key] = new ShardedDatabaseChanges(this, _context.ServerStore, _context.ShardExecutor.GetRequestExecutorAt(shardToTopology.Key), ShardHelper.ToShardName(_context.DatabaseName, shardToTopology.Key), onDispose: null, nodeTag: null, _throttleConnection);
             tasks.Add(_changes[shardToTopology.Key].EnsureConnectedNow());

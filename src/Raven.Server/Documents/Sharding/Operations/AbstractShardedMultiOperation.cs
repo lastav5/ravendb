@@ -96,7 +96,7 @@ public abstract class AbstractShardedMultiOperation
         _onProgress(progress);
     }
 
-    public async Task<IOperationResult> WaitForCompletionAsync<TOrchestratorResult>(CancellationToken token)
+    public async Task<IOperationResult> WaitForCompletionAsync<TOrchestratorResult>(CancellationToken token)//TODO stav: sharded WaitFoCompletion
         where TOrchestratorResult : IOperationResult, new()
     {
         _progresses = new Dictionary<int, IOperationProgress>(Operations.Count);

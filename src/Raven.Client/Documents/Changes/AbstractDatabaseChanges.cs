@@ -46,7 +46,7 @@ internal abstract class AbstractDatabaseChanges<TDatabaseConnectionState> : IDis
     private readonly TaskCompletionSource<ChangesSupportedFeatures> _supportedFeaturesTcs = new();
     internal Task<ChangesSupportedFeatures> GetSupportedFeaturesAsync() => _supportedFeaturesTcs.Task;
 
-    private ServerNode _serverNode;
+    internal ServerNode _serverNode;
     private int _nodeIndex;
     private Uri _url;
 
@@ -334,12 +334,14 @@ internal abstract class AbstractDatabaseChanges<TDatabaseConnectionState> : IDis
 
                     using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
                     {
+                        Console.WriteLine($"{_database}: DoWork: connecting to {_serverNode.ClusterTag}");
                         timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
 #if NET7_0_OR_GREATER
                         await _client.ConnectAsync(_url, RequestExecutor.HttpClient, timeoutCts.Token).ConfigureAwait(false);
 #else
                         await _client.ConnectAsync(_url, timeoutCts.Token).ConfigureAwait(false);
 #endif
+                        Console.WriteLine($"{_database}: Connected");
                     }
 
                     timerInSec = 1;
@@ -381,10 +383,10 @@ internal abstract class AbstractDatabaseChanges<TDatabaseConnectionState> : IDis
                     {
                         // If node tag is provided we should not failover to a different node
                         // Failing over will create a mismatch if the operation is created and monitored on the provided node tag
-                        if (string.IsNullOrEmpty(_nodeTag))
+                        //if (string.IsNullOrEmpty(_nodeTag))
                             _serverNode = await RequestExecutor.HandleServerNotResponsive(_url.AbsoluteUri, _serverNode, _nodeIndex, e).ConfigureAwait(false);
-                        else
-                            await RequestExecutor.UpdateTopologyAsync(new RequestExecutor.UpdateTopologyParameters(_serverNode) { TimeoutInMs = 0, ForceUpdate = true, DebugTag = $"changes-api-connection-failure-{_database}" }).ConfigureAwait(false);
+                        //else
+                            //await RequestExecutor.UpdateTopologyAsync(new RequestExecutor.UpdateTopologyParameters(_serverNode) { TimeoutInMs = 0, ForceUpdate = true, DebugTag = $"changes-api-connection-failure-{_database}" }).ConfigureAwait(false);
                     }
                     catch (DatabaseDoesNotExistException databaseDoesNotExistException)
                     {

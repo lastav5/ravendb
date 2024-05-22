@@ -32,6 +32,7 @@ public sealed class ShardedDatabaseMultiOperation : AbstractShardedMultiOperatio
 
     public override Operation CreateOperationInstance(ShardedDatabaseIdentifier key, long operationId)
     {
+        Console.WriteLine($"Created or got changes connection for shard {key.ShardNumber} on node {key.NodeTag}");
         var changes = ShardedDatabaseContext.Operations.GetChanges(key);
         var requestExecutor = ShardedDatabaseContext.ShardExecutor.GetRequestExecutorAt(key.ShardNumber);
 

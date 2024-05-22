@@ -17,6 +17,8 @@ using Raven.Client.Extensions;
 using Raven.Client.ServerWide.Operations;
 using Raven.Server.Config;
 using Raven.Server.Documents;
+using Raven.Server.Documents.Sharding;
+using Raven.Server.Utils;
 using SlowTests.Core.Utils.Entities;
 using Sparrow.Server;
 using Tests.Infrastructure;
@@ -189,6 +191,111 @@ update {{
                     Assert.Equal(expectedNode, op.NodeTag);
                     await op.WaitForCompletionAsync(cts.Token);
                 }
+            }
+        }
+
+        [RavenTheory(RavenTestCategory.ClientApi | RavenTestCategory.Patching)]
+        [RavenData(DatabaseMode = RavenDatabaseMode.Sharded)]
+        public async Task ChangesApiShouldNotFailOverWhenWaitingForCompletionOfOperation_ShardDown(Options options)
+        {
+            using (var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2)))
+            {
+                var (clusterNodes, leader) = await CreateRaftCluster(3, leaderIndex: 0, shouldRunInMemory: false);
+
+                if (options.DatabaseMode == RavenDatabaseMode.Sharded)
+                    options = Sharding.GetOptionsForCluster(leader, shards: 3, shardReplicationFactor: 2, orchestratorReplicationFactor: 1);
+                else
+                    options.ReplicationFactor = 3;
+
+                using (var store = GetDocumentStore(new Options(options)
+                {
+                    Server = leader,
+                    ModifyDocumentStore = (documentStore => documentStore.Conventions.DisableTopologyUpdates = true), // so request executor stays on the same node
+                }))
+                {
+
+                    using (var session = store.OpenAsyncSession())
+                    {
+                        await session.StoreAsync(new User(), "users/1");
+                        await session.SaveChangesAsync();
+                    }
+
+                    var patch = new PatchByQueryOperation(
+                        new IndexQuery
+                        {
+                            Query =
+                                $@"
+from Users as doc
+update {{
+    var copy = {{}};
+}}
+"
+                        },
+                        new QueryOperationOptions { AllowStale = false, StaleTimeout = TimeSpan.FromSeconds(30) }
+                    );
+
+                    var record = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    var orchTopology = record.Sharding.Orchestrator;
+
+                    var docShard = await Sharding.GetShardNumberForAsync(store, "users/1");
+
+                    var expectedNode = (await store.GetRequestExecutor().GetPreferredNode()).Node.ClusterTag;
+                    //set up waiting for changes api in WaitForCompletionAsync to set up web socket
+                    DocumentDatabase database;
+                    var delayQueryByPatch = new AsyncManualResetEvent();
+
+                    database = await (await Sharding.GetShardsDocumentDatabaseInstancesForDocId(store, "users/1", clusterNodes)).SingleAsync(shard  => orchTopology.Topology.RelevantFor(shard.ServerStore.NodeTag) == false,cts.Token);
+
+                    database.ForTestingPurposesOnly().DelayQueryByPatch = delayQueryByPatch;
+
+                    var op = await store.Operations.SendAsync(patch, token: cts.Token);
+                    //Assert.Equal(expectedNode, op.NodeTag);
+
+                    var orchestrator = Sharding.GetOrchestrator(store.Database, leader);
+                    var operations = orchestrator.Operations.GetAll();
+                    var operationOnOrch = operations.Single(x => x.DatabaseName == store.Database);
+                    
+                    var t = op.WaitForCompletionAsync(cts.Token);
+
+                    // wait for shards to connect
+                    await AssertWaitForTrueAsync(() => Task.FromResult(orchestrator.Operations._changes.Count >= 3));
+                    
+                    // setup waiting for shard connection error on orchestrator
+                    var waitWebSocketError = new AsyncManualResetEvent(cts.Token);
+                    var (key, changes) = orchestrator.Operations._changes.Single(x => x.Key.ShardNumber == docShard);
+                    changes.ConnectionStatusChanged += (sender, args) => { waitWebSocketError.Set(); };
+
+                    //wait for websocket to connect
+                    await AssertWaitForTrueAsync(() => Task.FromResult(changes.Connected));
+
+                    Console.WriteLine($"Node {database.ServerStore.NodeTag} down");
+                    //bring down server
+                    var result = await DisposeServerAndWaitForFinishOfDisposalAsync(database.ServerStore.Server);
+
+                    //wait for websocket to throw and retry
+                    await waitWebSocketError.WaitAsync(cts.Token);
+
+                    //bring server back up
+                    var settings = new Dictionary<string, string> { { RavenConfiguration.GetKey(x => x.Core.ServerUrls), result.Url } };
+                    var server = GetNewServer(new ServerCreationOptions { RunInMemory = false, DeletePrevious = false, DataDirectory = result.DataDirectory, CustomSettings = settings, NodeTag = result.NodeTag });
+                    Servers.Add(server);
+                    Console.WriteLine("UP");
+
+                    
+                    //run the operation again - should work
+                    op = await store.Operations.SendAsync(patch, token: cts.Token);
+
+                    // we reconnect to the same orchestrator
+                    Assert.Equal(expectedNode, op.NodeTag);
+
+                    //TODO stav: if we remove this check we still pass. need to check why WaitForCompletion doesn't time out
+                    // we reconnect to the same shard replica
+                    var changesApiShardNode = orchestrator.Operations._changes.Single(x => x.Key.ShardNumber == docShard).Value._serverNode.ClusterTag;
+                    Assert.Equal(key.NodeTag, changesApiShardNode);
+
+                    //TODO stav: does this create the operation itself again on the new shard?
+                    await op.WaitForCompletionAsync(cts.Token);
+                }//TODO stav: changes api for the shard does fail over but the test still passes
             }
         }
 

@@ -24,7 +24,7 @@ public partial class ShardedDatabaseContext
     {
         private readonly ShardedDatabaseContext _context;
 
-        private readonly ConcurrentDictionary<ShardedDatabaseIdentifier, DatabaseChanges> _changes = new();
+        internal readonly ConcurrentDictionary<ShardedDatabaseIdentifier, DatabaseChanges> _changes = new();//TODO stav: _changes for operations
 
         public ShardedOperations([NotNull] ShardedDatabaseContext context)
             : base(context.Changes, PlatformDetails.Is32Bits || context.Configuration.Storage.ForceUsing32BitsPager
@@ -137,13 +137,14 @@ public partial class ShardedDatabaseContext
             {
                 var result = await multiOperation.ExecuteCommandForShard(command, shardNumber, t);
                 
-                var key = new ShardedDatabaseIdentifier(result.OperationNodeTag, shardNumber);
+                var key = new ShardedDatabaseIdentifier(result.OperationNodeTag, shardNumber);//TODO stav: passing node tag here ensures changes stays on that node
                 var op = multiOperation.CreateOperationInstance(key, result.OperationId);
 
                 multiOperation.Watch<TOperationProgress>(key, op);
             }
         }
 
+        // TODO stav: need to dispose correctly (remove from dictionary)
         internal DatabaseChanges GetChanges(ShardedDatabaseIdentifier key) => _changes.GetOrAdd(key, k => new DatabaseChangesForShard(_context.ServerStore, _context.ShardExecutor.GetRequestExecutorAt(k.ShardNumber), ShardHelper.ToShardName(_context.DatabaseName, k.ShardNumber), onDispose: null, k.NodeTag));
 
 

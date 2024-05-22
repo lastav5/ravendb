@@ -2,12 +2,14 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using FastTests;
 using Tests.Infrastructure;
 using Raven.Server.Utils;
 using SlowTests.Corax;
 using SlowTests.Sharding.Cluster;
 using Xunit;
 using FastTests.Voron.Util;
+using SlowTests.Client;
 
 namespace Tryouts;
 
@@ -18,7 +20,7 @@ public static class Program
         XunitLogging.RedirectStreams = false;
     }
 
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
         Console.WriteLine(Process.GetCurrentProcess().Id);
 
@@ -29,11 +31,11 @@ public static class Program
             try
             {
                 using (var testOutputHelper = new ConsoleTestOutputHelper())
-                using (var test = new PForEncoderTests(testOutputHelper))
+                using (var test = new ChangesApiFailover(testOutputHelper))
                 {
                     DebuggerAttachedTimeout.DisableLongTimespan = true;
                     //test.CanRoundTripSmallContainer("GreaterThan42B");
-                    test.CanRespectBufferBoundaryForPage2();
+                    await test.ChangesApiShouldNotFailOverWhenWaitingForCompletionOfOperation_ShardDown(RavenTestBase.Options.ForMode(RavenDatabaseMode.Sharded));
                 }
             }
             catch (Exception e)
@@ -41,6 +43,7 @@ public static class Program
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine(e);
                 Console.ForegroundColor = ConsoleColor.White;
+                break;
             }
         }
     }
