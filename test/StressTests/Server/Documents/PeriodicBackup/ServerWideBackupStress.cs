@@ -29,7 +29,7 @@ namespace StressTests.Server.Documents.PeriodicBackup
         {
             // ReSharper disable once UseAwaitUsing
             using var stress = new RavenDB_14292(Output);
-            await stress.ServerWideBackupShouldBackupIdleDatabase(rounds);
+            await stress.ttt(rounds);
         }
 
         [NightlyBuildTheory]
@@ -38,7 +38,7 @@ namespace StressTests.Server.Documents.PeriodicBackup
         {
             // ReSharper disable once UseAwaitUsing
             using var stress = new RavenDB_14292(Output);
-            await stress.ServerWideBackupShouldBackupIdleDatabase(rounds);
+            await stress.ttt(rounds);
         }
 
         [Fact, Trait("Category", "Smuggler")]

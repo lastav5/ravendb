@@ -1237,11 +1237,13 @@ namespace Raven.Server.ServerWide
 
         private void RescheduleTimerIfDatabaseIdle(string db, object state)
         {
+            Console.WriteLine($"Server: {db}: RescheduleTimerIfDatabaseIdle. from command PutServerWideBackupConfigurationCommand");
             if (IdleDatabases.ContainsKey(db) == false)
                 return;
 
             if (state is long taskId == false)
             {
+                Console.WriteLine($"Server: {db}: RescheduleTimerIfDatabaseIdle: taskid is not a long.\n{Environment.StackTrace}");
                 Debug.Assert(state == null, 
                     $"This is probably a bug. This method should be called only for {nameof(PutServerWideBackupConfigurationCommand)} and the state should be the database periodic backup task id.");
                 //The database is excluded from the server-wide backup.
@@ -1263,10 +1265,13 @@ namespace Raven.Server.ServerWide
                     return;
                 }
             }
-
+            Console.WriteLine($"Server: {db}: RescheduleTimerIfDatabaseIdle 1");
+            //TODO stav: this should all be replaced with GetEarliest?
             var tag = BackupUtils.GetResponsibleNodeTag(Server.ServerStore, db, backupConfig.TaskId);
+            
             if (Engine.Tag != tag)
             {
+                Console.WriteLine($"Server: {db}: RescheduleTimerIfDatabaseIdle: Engine.Tag ({Engine.Tag}) != tag ({tag}). return null");
                 if (Logger.IsOperationsEnabled && tag != null)
                     Logger.Operations($"Could not reschedule the wakeup timer for idle database '{db}', because backup task '{backupConfig.Name}' with id '{taskId}' belongs to node '{tag}' current node is '{Engine.Tag}'.");
                 return;
@@ -1279,7 +1284,7 @@ namespace Raven.Server.ServerWide
             DateTime wakeup;
             if (backupConfig.FullBackupFrequency == null)
             {
-                wakeup = CrontabSchedule.Parse(backupConfig.IncrementalBackupFrequency).GetNextOccurrence(now);
+                wakeup = CrontabSchedule.Parse(backupConfig.IncrementalBackupFrequency).GetNextOccurrence(now);//TODO stav: needs to take into account backup status (might be null) - diff issue - use GetNextBackup or GetEarliest func
             }
             else
             {
@@ -2496,10 +2501,12 @@ namespace Raven.Server.ServerWide
 
         public void IdleOperations(object state)
         {
+            Console.WriteLine($"Server: {DateTime.UtcNow}: IdleOperations:");
             try
             {
                 foreach (var db in DatabasesLandlord.DatabasesCache)
                 {
+                    Console.WriteLine($"Server: {DateTime.UtcNow}: IdleOperations: {db.Key}: in for loop. db is in cache");
                     try
                     {
                         if (db.Value.Status != TaskStatus.RanToCompletion)
@@ -2508,7 +2515,10 @@ namespace Raven.Server.ServerWide
                         var database = db.Value.Result;
 
                         if (DatabaseNeedsToRunIdleOperations(database, out var mode))
+                        {
+                            Console.WriteLine($"Server: {DateTime.UtcNow}: IdleOperations: {db.Key}: DatabaseNeedsToRunIdleOperations. running them..");
                             database.RunIdleOperations(mode);
+                        }
                     }
                     catch (Exception e)
                     {
@@ -2524,7 +2534,10 @@ namespace Raven.Server.ServerWide
                     foreach (var databaseKvp in DatabasesLandlord.LastRecentlyUsed.ForceEnumerateInThreadSafeManner())
                     {
                         if (CanUnloadDatabase(databaseKvp.Key, databaseKvp.Value, statistics: null, out DocumentDatabase database) == false)
+                        {
+                            Console.WriteLine($"Server: {DateTime.UtcNow}: IdleOperations: {database.Name}: in LastRecentlyUsed for loop. CanUnloadDatabase = false. skipping unload");
                             continue;
+                        }
 
                         var dbIdEtagDictionary = new Dictionary<string, long>();
                         using (database.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext documentsContext))
@@ -2535,7 +2548,14 @@ namespace Raven.Server.ServerWide
                         }
 
                         if (DatabasesLandlord.UnloadDirectly(databaseKvp.Key, database.PeriodicBackupRunner.GetNextIdleDatabaseActivity(database.Name)))
+                        {
+                            Console.WriteLine($"Server: {DateTime.UtcNow}: IdleOperations: {database.Name}: in LastRecentlyUsed for loop. After UnloadDirectly success");
                             IdleDatabases[database.Name] = dbIdEtagDictionary;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Server: {DateTime.UtcNow}: IdleOperations: {database.Name}: in LastRecentlyUsed for loop. Did not UnloadDirectly successfully");
+                        }
                     }
                 }
                 catch (Exception e)
@@ -2580,7 +2600,7 @@ namespace Raven.Server.ServerWide
                     statistics.IsLoaded = false;
                     statistics.Explanations.Add("Cannot unload database because it is not loaded yet.");
                 }
-
+                Console.WriteLine($"Server: {DateTime.UtcNow}: CanUnloadDatabase: {database.Name}: DatabasesCache.TryGetValue = false");
                 return false;
             }
 
@@ -2593,6 +2613,7 @@ namespace Raven.Server.ServerWide
 
             if (diff <= maxTimeDatabaseCanBeIdle)
             {
+                Console.WriteLine($"Server: {DateTime.UtcNow}: CanUnloadDatabase: {database.Name}: diff({diff}) <= maxTimeDatabaseCanBeIdle({maxTimeDatabaseCanBeIdle})");
                 if (statistics == null)
                     return false;
                 else
@@ -2613,7 +2634,7 @@ namespace Raven.Server.ServerWide
                     statistics.RunInMemory = true;
                     statistics.Explanations.Add("Cannot unload database because it is running in memory.");
                 }
-
+                Console.WriteLine($"Server: {DateTime.UtcNow}: CanUnloadDatabase: {database.Name}: RunInMemory");
                 return false;
             }
 
@@ -2640,6 +2661,7 @@ namespace Raven.Server.ServerWide
 
             if (diff <= maxTimeDatabaseCanBeIdle)
             {
+                Console.WriteLine($"Server: {DateTime.UtcNow}: CanUnloadDatabase: {database.Name}: ({diff}) between now ({now}) and last work time ({lastWork}) is lower or equal to max idle time ({maxTimeDatabaseCanBeIdle})");
                 if (statistics == null)
                     return false;
                 else
@@ -2680,6 +2702,7 @@ namespace Raven.Server.ServerWide
 
             if (hasActiveOperations)
             {
+                Console.WriteLine($"Server: {DateTime.UtcNow}: CanUnloadDatabase: {database.Name}: has active operations");
                 if (statistics == null)
                     return false;
                 else

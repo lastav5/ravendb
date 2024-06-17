@@ -99,7 +99,7 @@ namespace Raven.Client.Documents.Operations.Backups
 
         public static string GenerateItemName(string databaseName, long taskId)
         {
-            return $"values/{databaseName}/{Prefix}{taskId}";
+            return $"values/{databaseName}/{Prefix}{taskId}";//TODO stav: add ending so it is not used as prefix?
         }
     }
 

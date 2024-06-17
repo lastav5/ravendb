@@ -417,8 +417,16 @@ namespace Raven.Server.Documents.PeriodicBackup
                     nowInLocalTime = DateTime.Now;
                 }
 
+                Console.WriteLine($"");
                 if (Directory.Exists(backupDirectory.FullPath) == false)
+                {
+                    Console.WriteLine($"creating backup directory {backupDirectory.FullPath}\n {Environment.StackTrace}");
                     Directory.CreateDirectory(backupDirectory.FullPath);
+                }
+                else
+                {
+                    Console.WriteLine($"did not create backup directory cuz it already exists {backupDirectory.FullPath}");
+                }
             }
             else
             {

@@ -28,7 +28,7 @@ namespace StressTests.Issues
 
         [Theory]
         [InlineData(1)]
-        public async Task ServerWideBackupShouldBackupIdleDatabase(int rounds)
+        public async Task ttt(int rounds)
         {
             const string fullBackupFrequency = "*/2 * * * *";
             var backupParser = CrontabSchedule.Parse(fullBackupFrequency);
@@ -83,7 +83,7 @@ namespace StressTests.Issues
 
                 Assert.True(1 == server.ServerStore.IdleDatabases.Count, $"IdleDatabasesCount({server.ServerStore.IdleDatabases.Count}), Round({i})");
                 Assert.True(server.ServerStore.IdleDatabases.ContainsKey(store.Database), $"Round({i})");
-
+                Console.WriteLine($"TEST: {DateTime.UtcNow} Database is idle");
                 DateTime lastBackup;
                 if (first)
                 {
@@ -117,8 +117,10 @@ namespace StressTests.Issues
                 var timeToWait = nextBackup - DateTime.UtcNow;
                 if (timeToWait > TimeSpan.Zero)
                 {
+                    Console.WriteLine($"TEST: {DateTime.UtcNow}: Waiting for {timeToWait}");
                     await Task.Delay(timeToWait);
                 }
+                Console.WriteLine($"TEST: {DateTime.UtcNow}: Time to wait done. Database should wake up");
 
                 status = await AssertWaitForNextBackup(store.Database, status);
                 controlGroupStatus = await AssertWaitForNextBackup(controlgroupDbName, controlGroupStatus);
@@ -128,6 +130,7 @@ namespace StressTests.Issues
                     Assert.True(await WaitForValueAsync(async () =>
                     {
                         nextStatus = (await store.Maintenance.ForDatabase(db).SendAsync(periodicBackupStatusOperation)).Status;
+                        Console.WriteLine($"TEST: nextStatus==null ({nextStatus == null})");
                         if (nextStatus == null)
                             return false;
                         Assert.True(nextStatus.Error?.Exception == null, nextStatus.Error?.Exception);
@@ -145,8 +148,10 @@ namespace StressTests.Issues
                 AssertBackupDirCount(store.Database, status);
                 void AssertBackupDirCount(string db, PeriodicBackupStatus periodicBackupStatus)
                 {
+                    Console.WriteLine($"TEST: checking folders for {db}");
                     var backupPath = Path.Combine(baseBackupPath, db);
                     var backupDirs = Directory.GetDirectories(backupPath);
+                    Console.WriteLine($"TEST: folder details: {PrintBackups(periodicBackupStatus, backupDirs)}");
                     Assert.True(i + 1 == backupDirs.Length,
                         $"firstBackupStartTime: {backupStartTime}, checkTime: {DateTime.UtcNow}, i: {i}, " +
                         $"controlGroupBackupNum: {backupDirs.Length}, path: {backupPath}, {PrintBackups(periodicBackupStatus, backupDirs)}");

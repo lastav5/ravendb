@@ -1472,6 +1472,7 @@ namespace Raven.Server.Documents
 
                         try
                         {
+                            Console.WriteLine($"Server: {Name}: NotifyFeaturesAboutStateChangeAsync: index {index}");
                             PeriodicBackupRunner?.UpdateConfigurations(record.PeriodicBackups);
                             EtlLoader?.HandleDatabaseRecordChange(record);
                             SubscriptionStorage?.HandleDatabaseRecordChange(record.Topology);

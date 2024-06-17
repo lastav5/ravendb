@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using FastTests.Blittable;
 using FastTests.Client;
@@ -10,6 +11,7 @@ using SlowTests.Issues;
 using SlowTests.MailingList;
 using SlowTests.Rolling;
 using SlowTests.Server.Documents.ETL.Raven;
+using StressTests.Issues;
 using Tests.Infrastructure;
 
 namespace Tryouts
@@ -30,9 +32,11 @@ namespace Tryouts
                 try
                 {
                     using (var testOutputHelper = new ConsoleTestOutputHelper())
-                    using (var test = new RavenDB_21173(testOutputHelper))
+                    using (var test = new RavenDB_14292(testOutputHelper))
                     {
-                        await test.ClusterTransaction_Failover_Shouldnt_Throw_ConcurrencyException();
+
+                        await test.ttt(1);
+
                     }
                 }
                 catch (Exception e)
@@ -40,6 +44,7 @@ namespace Tryouts
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine(e);
                     Console.ForegroundColor = ConsoleColor.White;
+                    break;
                 }
             }
         }

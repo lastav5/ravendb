@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using McMaster.Extensions.CommandLineUtils;
 using Nito.AsyncEx;
 using Raven.Client.Documents.Operations.Backups;
 using Raven.Client.Exceptions.Database;
@@ -151,6 +152,7 @@ namespace Raven.Server.Documents
 
                     if (DatabasesCache.TryGetValue(databaseName, out var task) == false)
                     {
+                        Console.WriteLine($"Server: {databaseName}: HandleClusterDatabaseChanged: type {type} {changeType.ToString()}");
                         // if the database isn't loaded, but it is relevant for this node, we need to create
                         // it. This is important so things like replication will start pumping, and that
                         // configuration changes such as running periodic backup will get a chance to run, which
@@ -238,9 +240,10 @@ namespace Raven.Server.Documents
                 }
             }
         }
-
+        
         private bool PreventWakeUpIdleDatabase(string databaseName, string type)
         {
+            Console.WriteLine($"Server: {databaseName}: PreventWakeUpIdleDatabase?: type {type}");
             if (_serverStore.IdleDatabases.ContainsKey(databaseName) == false)
                 return false;
 
@@ -671,6 +674,7 @@ namespace Raven.Server.Documents
 
         private Task<DocumentDatabase> CreateDatabase(StringSegment databaseName, DateTime? wakeup, bool ignoreDisabledDatabase, bool ignoreBeenDeleted, bool ignoreNotRelevant, string caller, Action<string> addToInitLog = null)
         {
+            Console.WriteLine($"Server: {databaseName}: CreateDatabase\n{Environment.StackTrace}");
             var config = CreateDatabaseConfiguration(databaseName, ignoreDisabledDatabase, ignoreBeenDeleted, ignoreNotRelevant);
             if (config == null)
                 return Task.FromResult<DocumentDatabase>(null);
@@ -1041,16 +1045,19 @@ namespace Raven.Server.Documents
             try
             {
                 UnloadDatabaseInternal(databaseName.Value, caller);
-                LastRecentlyUsed.TryRemove(databaseName, out _);
+                LastRecentlyUsed.TryRemove(databaseName, out _); //TODO stav: can't remove while we are iterating over this?
 
                 // DateTime should be only null in tests
                 if (idleDatabaseActivity is { DateTime: not null })
+                {
+                    Console.WriteLine($"Server: {DateTime.UtcNow}: {databaseName}: UnloadDirectly: Adding timer for {idleDatabaseActivity.DueTime}");
                     _wakeupTimers.TryAdd(databaseName.Value, new Timer(
                         callback: _ => NextScheduledActivityCallback(databaseName.Value, idleDatabaseActivity),
                         state: null,
                         // in case the DueTime is negative or zero, the callback will be called immediately and database will be loaded.
                         dueTime: idleDatabaseActivity.DueTime > 0 ? idleDatabaseActivity.DueTime : 0,
                         period: Timeout.Infinite));
+                }
 
                 if (_logger.IsOperationsEnabled)
                 {
@@ -1093,8 +1100,13 @@ namespace Raven.Server.Documents
             if (_wakeupTimers.TryGetValue(databaseName, out var oldTimer))
             {
                 oldTimer.Dispose();
+                Console.WriteLine($"Server: {DateTime.UtcNow}: {databaseName}: RescheduleNextIdleDatabaseActivity: disposed old timer");
             }
-
+            else
+            {
+                Console.WriteLine($"Server: {DateTime.UtcNow}: {databaseName}: RescheduleNextIdleDatabaseActivity: did NOT dispose old timer because it wasn't in the dict");
+            }
+            Console.WriteLine($"Server: {DateTime.UtcNow}: {databaseName}: RescheduleNextIdleDatabaseActivity: Adding timer for {idleDatabaseActivity.DateTime} (duetime {idleDatabaseActivity.DueTime}) because of idleActivity {idleDatabaseActivity.Type}");
             var newTimer = new Timer(_ => NextScheduledActivityCallback(databaseName, idleDatabaseActivity), null, idleDatabaseActivity.DueTime, Timeout.Infinite);
             _wakeupTimers.AddOrUpdate(databaseName, _ => newTimer, (_, __) => newTimer);
         }
@@ -1138,6 +1150,7 @@ namespace Raven.Server.Documents
                             break;
 
                         case IdleDatabaseActivityType.WakeUpDatabase:
+                            Console.WriteLine($"Server: {DateTime.UtcNow}: {databaseName}: NextScheduledActivityCallback: WakeUpDatabase");
                             _ = TryGetOrCreateResourceStore(databaseName, nextIdleDatabaseActivity.DateTime).ContinueWith(t =>
                             {
                                 var ex = t.Exception.ExtractSingleInnerException();

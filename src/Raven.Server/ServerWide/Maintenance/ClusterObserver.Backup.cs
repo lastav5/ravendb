@@ -67,7 +67,8 @@ internal partial class ClusterObserver
 
         DateTime? notSuitableForTaskSince = null;
         responsibleNodeBlittable?.TryGet(nameof(ResponsibleNodeInfo.NotSuitableForTaskSince), out notSuitableForTaskSince);
-
+        Console.WriteLine($"Server: {databaseName}: GetResponsibleNodeInfo: {newResponsibleNode.Reason}");
+        
         switch (newResponsibleNode.Reason)
         {
             case ResponsibleNodeForBackup.ChosenNodeReason.SameResponsibleNode:
@@ -75,6 +76,7 @@ internal partial class ClusterObserver
             case ResponsibleNodeForBackup.ChosenNodeReason.SameResponsibleNodeDueToMissingHighlyAvailableTasks:
                 if (currentResponsibleNode == null)
                 {
+                    Console.WriteLine($"Server: {databaseName}: GetResponsibleNodeInfo: SameResponsibleNodeDueToMissingHighlyAvailableTasks. topology: {topology}");
                     // backward compatibility - missing responsible node in the cluster storage
                     return new ResponsibleNodeInfo
                     {
@@ -89,7 +91,7 @@ internal partial class ClusterObserver
 
                     AddToDecisionLog(databaseName, $"Node '{currentResponsibleNode}' was in rehab for {DateTime.UtcNow - notSuitableForTaskSince}. " +
                                                    $"Since it's now in a member state, the backup task '{configuration.Name}' will continue to run on that node");
-
+                    Console.WriteLine($"Server: {databaseName}: GetResponsibleNodeInfo: SameResponsibleNodeDueToMissingHighlyAvailableTasks 2. topology: {topology}");
                     return new ResponsibleNodeInfo
                     {
                         TaskId = configuration.TaskId,
@@ -107,6 +109,7 @@ internal partial class ClusterObserver
             case ResponsibleNodeForBackup.ChosenNodeReason.NonExistingResponsibleNode:
             case ResponsibleNodeForBackup.ChosenNodeReason.CurrentResponsibleNodeRemovedFromTopology:
                 AddToDecisionLog(newResponsibleNode, configuration.TaskId, databaseName);
+                Console.WriteLine($"Server: {databaseName}: GetResponsibleNodeInfo: NonExistingResponsibleNode. topology: {topology}");
                 return new ResponsibleNodeInfo
                 {
                     TaskId = configuration.TaskId,
@@ -119,7 +122,7 @@ internal partial class ClusterObserver
                     // it's the first time that we identify that the node isn't suitable for backup
                     AddToDecisionLog(databaseName, $"Node '{currentResponsibleNode}' is currently in rehab state. " +
                                                    $"The backup task '{configuration.Name}' will be moved to another node at: {DateTime.UtcNow + moveToNewResponsibleNodeGracePeriod} (UTC)");
-
+                    Console.WriteLine($"Server: {databaseName}: GetResponsibleNodeInfo: CurrentResponsibleNodeNotResponding. topology: {topology}");
                     return new ResponsibleNodeInfo
                     {
                         TaskId = configuration.TaskId,
@@ -135,6 +138,7 @@ internal partial class ClusterObserver
                 }
 
                 AddToDecisionLog(newResponsibleNode, configuration.TaskId, databaseName);
+                Console.WriteLine($"Server: {databaseName}: GetResponsibleNodeInfo: CurrentResponsibleNodeNotResponding 2. topology: {topology}");
                 return new ResponsibleNodeInfo
                 {
                     TaskId = configuration.TaskId,
@@ -182,7 +186,7 @@ internal partial class ClusterObserver
         {
             // we don't have a responsible node for the backup
             var newNode = topology.WhoseTaskIsIt(configuration);
-            return new NonExistingResponsibleNode(newNode, configuration.Name);
+            return new NonExistingResponsibleNode(newNode, configuration.Name);//TODO stav: creates a new responsible node for the backup
         }
 
         if (topology.Members.Contains(lastResponsibleNode))

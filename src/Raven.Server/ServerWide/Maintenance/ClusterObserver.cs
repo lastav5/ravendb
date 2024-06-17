@@ -394,6 +394,7 @@ namespace Raven.Server.ServerWide.Maintenance
                     throw new NotLeadingException("This node is no longer the leader, so we abort updating the responsible node for backup tasks");
                 }
 
+                Console.WriteLine($"Server: new UpdateResponsibleNodeForTasksCommand");
                 var command = new UpdateResponsibleNodeForTasksCommand(new UpdateResponsibleNodeForTasksCommand.Parameters
                 {
                     ResponsibleNodePerDatabase = responsibleNodePerDatabase

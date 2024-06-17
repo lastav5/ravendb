@@ -3852,7 +3852,7 @@ namespace Raven.Server.ServerWide
                 foreach (var keyValue in command.Value.ResponsibleNodePerDatabase)
                 {
                     var databaseName = keyValue.Key;
-
+                    long taskId; 
                     foreach (var responsibleNodeInfo in keyValue.Value)
                     {
                         var itemKey = ResponsibleNodeInfo.GenerateItemName(databaseName, responsibleNodeInfo.TaskId);
@@ -3864,7 +3864,7 @@ namespace Raven.Server.ServerWide
                             UpdateValue(index, items, valueNameLowered, valueName, value);
                         }
                     }
-
+                    //TODO stav: the RescheduleBackup func expects state to be taskId of the backup (when its PutServerWideBackup).
                     actions.Add(() =>
                         Changes.OnDatabaseChanges(databaseName, index, type, DatabasesLandlord.ClusterDatabaseChangeType.ValueChanged, null));
                 }
@@ -3949,7 +3949,7 @@ namespace Raven.Server.ServerWide
 
                         oldDatabaseRecord.Modifications = new DynamicJsonValue(oldDatabaseRecord) { [nameof(DatabaseRecord.PeriodicBackups)] = newBackups };
                         var updatedDatabaseRecord = context.ReadObject(oldDatabaseRecord, "updated-database-record");
-
+                        Console.WriteLine($"CSM: adding backup for {databaseName}. with key {key}. with id {periodicBackupTaskId}");
                         toUpdate.Add((Key: key, DatabaseRecord: updatedDatabaseRecord, DatabaseName: databaseName, perDbState: periodicBackupTaskId));
                     }
                 }

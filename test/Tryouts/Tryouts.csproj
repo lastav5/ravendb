@@ -92,6 +92,7 @@
     <ProjectReference Include="..\RachisTests\RachisTests.csproj" />
     <ProjectReference Include="..\SlowTests\SlowTests.csproj" />
     <ProjectReference Include="..\Tests.Infrastructure\Tests.Infrastructure.csproj" />
+	<ProjectReference Include="..\StressTests\StressTests.csproj" />
   </ItemGroup>
 
   <Target Name="PlatformMessage" AfterTargets="Build">

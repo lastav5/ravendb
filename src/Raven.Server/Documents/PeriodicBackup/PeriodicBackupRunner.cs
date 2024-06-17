@@ -66,7 +66,8 @@ namespace Raven.Server.Documents.PeriodicBackup
 
             // we pass wakeup-1 to ensure the backup will run right after DB woke up on wakeup time, and not on the next occurrence.
             // relevant only if it's the first backup after waking up
-            _databaseWakeUpTimeUtc = wakeup?.AddMinutes(-1);
+            _databaseWakeUpTimeUtc = wakeup?.AddMinutes(-1);//TODO stav: will only work for cron of 1 minute or less?
+            Console.WriteLine($"Server: {DateTime.UtcNow}: {_database.Name}: PeriodicBackupRunner ctor: _databaseWakeUpTimeUtc = {_databaseWakeUpTimeUtc}\n{Environment.StackTrace}");
 
             _database.TombstoneCleaner.Subscribe(this);
             IOExtensions.DeleteDirectory(_tempBackupPath.FullPath);
@@ -108,6 +109,7 @@ namespace Raven.Server.Documents.PeriodicBackup
 
         internal void TimerCallback(object backupTaskDetails)
         {
+            Console.WriteLine($"Server: {_database.Name}: TimerCallback");
             try
             {
                 var backupDetails = (NextBackup)backupTaskDetails;
@@ -124,7 +126,15 @@ namespace Raven.Server.Documents.PeriodicBackup
                 }
 
                 if (ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded(backupDetails, out PeriodicBackup periodicBackup) == false)
+                {
+                    Console.WriteLine($"Server: {_database.Name}: TimerCallback: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded = false");
                     return;
+                }
+                else
+                {
+                    Console.WriteLine($"Server: {_database.Name}: TimerCallback: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded = true");
+                }
+            
 
                 StartBackupTaskAndRescheduleIfNeeded(periodicBackup, backupDetails);
             }
@@ -151,11 +161,19 @@ namespace Raven.Server.Documents.PeriodicBackup
                 }
 
                 if (ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded(backupDetails, out PeriodicBackup periodicBackup) == false)
+                {
+                    Console.WriteLine($"Server: {_database.Name}: LongPeriodTimerCallback: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded = false");
                     return;
+                }
+                else
+                {
+                    Console.WriteLine($"Server: {_database.Name}: LongPeriodTimerCallback: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded = true");
+                }
 
                 var remainingInterval = backupDetails.TimeSpan - MaxTimerTimeout;
                 if (remainingInterval.TotalMilliseconds <= 0)
                 {
+                    Console.WriteLine($"Server: {_database.Name}: LongPeriodTimerCallback: remainingInterval <= 0");
                     StartBackupTaskAndRescheduleIfNeeded(periodicBackup, backupDetails);
                     return;
                 }
@@ -176,6 +194,7 @@ namespace Raven.Server.Documents.PeriodicBackup
             }
             catch (BackupDelayException e)
             {
+                Console.WriteLine($"Server: {_database.Name}: StartBackupTaskAndRescheduleIfNeeded: BackupDelayException. adding {e.DelayPeriod} time to timer");
                 if (_logger.IsOperationsEnabled)
                     _logger.Operations($"Backup task will be retried in {(int)e.DelayPeriod.TotalSeconds} seconds, Reason: {e.Message}");
 
@@ -287,7 +306,10 @@ namespace Raven.Server.Documents.PeriodicBackup
         public IdleDatabaseActivity GetNextIdleDatabaseActivity(string databaseName)
         {
             if (_periodicBackups.IsEmpty)
+            {
+                Console.WriteLine($"Server: {databaseName}: GetNextIdleDatabaseActivity(string db): _periodicBackups.IsEmpty = true. return null");
                 return null;
+            }
 
             long lastEtag;
 
@@ -312,6 +334,7 @@ namespace Raven.Server.Documents.PeriodicBackup
 
         private long CreateBackupTask(PeriodicBackup periodicBackup, bool isFullBackup, DateTime startTimeInUtc)
         {
+            Console.WriteLine($"Server: {_database.Name}: CreateBackupTask (1/2)");
             using (periodicBackup.UpdateBackupTask())
             {
                 if (periodicBackup.Disposed)
@@ -327,6 +350,7 @@ namespace Raven.Server.Documents.PeriodicBackup
                 }
 
                 BackupUtils.CheckServerHealthBeforeBackup(_serverStore, periodicBackup.Configuration.Name);
+                Console.WriteLine($"Server: {_database.Name}: CreateBackupTask: (2/2)\n{Environment.StackTrace}");
                 _serverStore.ConcurrentBackupsCounter.StartBackup(periodicBackup.Configuration.Name, _logger);
 
                 var tcs = new TaskCompletionSource<IOperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -373,7 +397,7 @@ namespace Raven.Server.Documents.PeriodicBackup
                         Id = operationId,
                         Task = tcs.Task
                     };
-
+                    Console.WriteLine($"Server: {_database.Name}: CreateBackupTask: Adding Operation (long running thread)");
                     var task = _database.Operations.AddOperation(
                         null,
                         $"{backupTypeText} backup task: '{periodicBackup.Configuration.Name}'. Database: '{_database.Name}'",
@@ -533,6 +557,7 @@ namespace Raven.Server.Documents.PeriodicBackup
 
         private bool ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded(NextBackup backupInfo, out PeriodicBackup periodicBackup)
         {
+            Console.WriteLine($"Server: {_database.Name}: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded :{Environment.StackTrace}");
             if (_periodicBackups.TryGetValue(backupInfo.TaskId, out periodicBackup) == false)
             {
                 if (_logger.IsOperationsEnabled)
@@ -541,6 +566,7 @@ namespace Raven.Server.Documents.PeriodicBackup
                 // periodic backup doesn't exist anymore
                 return false;
             }
+            Console.WriteLine($"Server: {_database.Name}: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded 1/4");
 
             using (_serverStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
             using (context.OpenReadTransaction())
@@ -554,7 +580,7 @@ namespace Raven.Server.Documents.PeriodicBackup
                     return false;
                 }
             }
-
+            Console.WriteLine($"Server: {_database.Name}: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded 2/4");
             var taskStatus = GetTaskStatus(periodicBackup.Configuration, out _);
             if (_forTestingPurposes != null)
             {
@@ -563,7 +589,7 @@ namespace Raven.Server.Documents.PeriodicBackup
                     taskStatus = TaskStatus.ActiveByOtherNode;
                 }
             }
-
+            Console.WriteLine($"Server: {_database.Name}: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded 3/4");
             string msg;
             switch (taskStatus)
             {
@@ -583,7 +609,7 @@ namespace Raven.Server.Documents.PeriodicBackup
 
             if (_logger.IsOperationsEnabled)
                 _logger.Operations(msg);
-
+            Console.WriteLine($"Server: {_database.Name}: ShouldRunBackupAfterTimerCallbackAndRescheduleIfNeeded: 4/4 taskStatus: {taskStatus.ToString()}");
             return taskStatus == TaskStatus.ActiveByCurrentNode;
         }
 
@@ -646,9 +672,10 @@ namespace Raven.Server.Documents.PeriodicBackup
 
         public void UpdateConfigurations(List<PeriodicBackupConfiguration> configurations)
         {
+            Console.WriteLine($"Server: {_database.Name}: UpdateConfigurations: count: {configurations?.Count}");
             if (_disposed)
                 return;
-
+            
             if (configurations == null)
             {
                 foreach (var periodicBackup in _periodicBackups)
@@ -722,7 +749,12 @@ namespace Raven.Server.Documents.PeriodicBackup
                         _logger.Info($"New backup task '{taskId}' state is '{taskState}', will arrange a new backup timer.");
 
                     var backupStatus = GetBackupStatus(taskId, inMemoryBackupStatus: null);
+                    Console.WriteLine($"Server: {_database.Name}: UpdatePeriodicBackup: taskState == TaskStatus.ActiveByCurrentNode. Updating timer..");
                     periodicBackup.UpdateTimer(GetNextBackupDetails(newConfiguration, backupStatus, _serverStore.NodeTag), lockTaken: false);
+                }
+                else
+                {
+                    Console.WriteLine($"Server: {_database.Name}: skipped updating timer..");
                 }
 
                 return;
