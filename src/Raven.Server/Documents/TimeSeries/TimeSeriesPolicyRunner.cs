@@ -99,8 +99,18 @@ namespace Raven.Server.Documents.TimeSeries
 
         protected override async Task DoWork()
         {
+            if (Logger.IsOperationsEnabled)
+            {
+                Logger.Operations($"{this._database.Name}: In TimeSeriesPolicyRunner.DoWork (support)");
+            }
+
             // this is explicitly outside the loop
             await HandleChanges();
+
+            if (Logger.IsOperationsEnabled)
+            {
+                Logger.Operations($"{this._database.Name}: In DoWork - before while loop");
+            }
 
             while (Cts.IsCancellationRequested == false)
             {
@@ -264,6 +274,10 @@ namespace Raven.Server.Documents.TimeSeries
 
         internal async Task<long> RunRollups(bool propagateException = true, List<string> explanations = null)
         {
+            if (Logger.IsOperationsEnabled)
+            {
+                Logger.Operations($"{_database.Name}: In RunRollups");
+            }
             var now = _database.Time.GetUtcNow();
             var total = 0L;
             try
@@ -287,6 +301,10 @@ namespace Raven.Server.Documents.TimeSeries
                             _database.DocumentsStorage.TimeSeriesStorage.Rollups.PrepareRollups(context, now, 1024, start, states, out duration);
                             if (states.Count == 0)
                             {
+                                if (Logger.IsOperationsEnabled)
+                                {
+                                    Logger.Operations($"{this._database.Name}: Found 0 states when preparing rollups");
+                                }
                                 explanations?.Add($"Cannot run rollups at '{now.GetDefaultRavenFormat()}' because there are no rollup states.");
                                 return total;
                             }
@@ -318,6 +336,10 @@ namespace Raven.Server.Documents.TimeSeries
             }
             catch (OperationCanceledException)
             {
+                if (Logger.IsOperationsEnabled)
+                {
+                    Logger.Operations($"{this._database.Name}: RunRollups threw OperationCanceledException");
+                }
                 // this will stop processing
                 throw;
             }
@@ -335,10 +357,20 @@ namespace Raven.Server.Documents.TimeSeries
 
         internal async Task DoRetention(bool propagateException = true)
         {
+            if (Logger.IsOperationsEnabled)
+            {
+                Logger.Operations($"{_database.Name}: In DoRetention");
+            }
             var topology = _database.ServerStore.LoadDatabaseTopology(_database.Name);
             var isFirstInTopology = string.Equals(topology.Members.FirstOrDefault(), _database.ServerStore.NodeTag, StringComparison.OrdinalIgnoreCase);
             if (isFirstInTopology == false)
+            {
+                if (Logger.IsOperationsEnabled)
+                {
+                    Logger.Operations($"{_database.Name}: The first node in topology is {topology.Members.FirstOrDefault()} while the local node is {_database.ServerStore.NodeTag}. Skipping Retention check.");
+                }
                 return;
+            }
 
             var now = _database.Time.GetUtcNow();
             var configuration = Configuration.Collections;
@@ -349,6 +381,11 @@ namespace Raven.Server.Documents.TimeSeries
                 {
                     var collection = collectionConfig.Key;
 
+                    if (Logger.IsOperationsEnabled)
+                    {
+                        Logger.Operations($"{_database.Name}: Processing retention for config of collection {collection}: {collectionConfig.Value}");
+                    }
+
                     var config = collectionConfig.Value;
                     if (config.Disabled)
                         continue;
@@ -357,8 +394,14 @@ namespace Raven.Server.Documents.TimeSeries
                     {
                         var collectionName = _database.DocumentsStorage.GetCollection(collection, throwIfDoesNotExist: false);
                         if (collectionName == null)
+                        {
+                            if (Logger.IsOperationsEnabled)
+                            {
+                                Logger.Operations($"{_database.Name}: DoRetention: The collection {collection} does not exist in storage. skipping.");
+                            }
                             continue;
-                        
+                        }
+
                         await ApplyRetention(context, config, collectionName, config.RawPolicy, now);
 
                         foreach (var policy in config.Policies)
@@ -370,6 +413,10 @@ namespace Raven.Server.Documents.TimeSeries
             }
             catch (OperationCanceledException)
             {
+                if (Logger.IsOperationsEnabled)
+                {
+                    Logger.Operations($"{_database.Name}: DoRetention threw OperationCanceledException.");
+                }
                 // this will stop processing
                 throw;
             }
@@ -390,6 +437,11 @@ namespace Raven.Server.Documents.TimeSeries
             TimeSeriesPolicy policy, 
             DateTime now)
         {
+            if (Logger.IsOperationsEnabled)
+            {
+                Logger.Operations($"{this._database.Name}: In ApplyRetention for collection {collectionName} and policy `{policy.Name}` with retention time {policy.RetentionTime.Value} {policy.RetentionTime.Unit}");
+            }
+
             var tss = context.DocumentDatabase.DocumentsStorage.TimeSeriesStorage;
             if (policy.RetentionTime == TimeValue.MaxValue)
                 return;
@@ -407,17 +459,40 @@ namespace Raven.Server.Documents.TimeSeries
 
                 using (context.OpenReadTransaction())
                 {
-                    foreach (var item in tss.Stats.GetTimeSeriesByPolicyFromStartDate(context, collectionName, policy.Name, to, TimeSeriesRollups.TimeSeriesRetentionCommand.BatchSize))
+                    if (Logger.IsOperationsEnabled)
                     {
-                        if (RequiredForNextPolicy(context, config, policy, item, to)) 
+                        Logger.Operations($"{this._database.Name}: ApplyRetention: Getting timeseries policy from date {to} backwards");
+                    }
+
+                    foreach (var item in tss.Stats.GetTimeSeriesByPolicyFromStartDate(context, collectionName, policy.Name, to, TimeSeriesRollups.TimeSeriesRetentionCommand.BatchSize, Logger, _database.Name))
+                    {
+                        if (RequiredForNextPolicy(context, config, policy, item, to, Logger, _database.Name))
+                        {
+                            if (Logger.IsOperationsEnabled)
+                            {
+                                Logger.Operations($"{_database.Name}: ApplyRetention: {item} is RequiredForNextPolicy. Skipping.");
+                            }
                             continue;
+                        }
 
                         if (tss.Rollups.HasPendingRollupFrom(context, item, to) == false)
+                        {
+                            if (Logger.IsOperationsEnabled)
+                            {
+                                Logger.Operations($"{_database.Name}: ApplyRetention: {item} has no pending rollups. Adding.");
+                            }
                             list.Add(item);
+                        }
                     }
 
                     if (list.Count == 0)
+                    {
+                        if (Logger.IsOperationsEnabled)
+                        {
+                            Logger.Operations($"{_database.Name}: ApplyRetention: There were no relevant timeseries to apply retention to.");
+                        }
                         return;
+                    }
 
                     if (Logger.IsInfoEnabled)
                     {
@@ -436,7 +511,7 @@ namespace Raven.Server.Documents.TimeSeries
             }
         }
 
-        private static bool RequiredForNextPolicy(DocumentsOperationContext context, TimeSeriesCollectionConfiguration config, TimeSeriesPolicy policy, Slice item, DateTime to)
+        private static bool RequiredForNextPolicy(DocumentsOperationContext context, TimeSeriesCollectionConfiguration config, TimeSeriesPolicy policy, Slice item, DateTime to, Logger logger, string databaseName)
         {
             var tss = context.DocumentDatabase.DocumentsStorage.TimeSeriesStorage;
             var next = config.GetNextPolicy(policy);
@@ -458,6 +533,10 @@ namespace Raven.Server.Documents.TimeSeries
                         return false;
                     }
 
+                    if (logger.IsOperationsEnabled)
+                    {
+                        logger.Operations($"{databaseName}: RequiredForNextPolicy: {item} is RequiredForNextPolicy. currentStats: {currentStats}. nextStats: {nextStats}. nextEnd: {nextEnd}");
+                    }
                     return true;
                 }
             }

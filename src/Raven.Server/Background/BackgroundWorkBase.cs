@@ -103,6 +103,10 @@ namespace Raven.Server.Background
                     return;
                 }
 
+                if (Logger.IsOperationsEnabled)
+                {
+                    Logger.Operations($"WaitOrThrowOperationCanceled: waiting for {time} until running retention and rollups again.");
+                }
                 // if cancellation requested then it will throw TaskCancelledException and we stop the work
                 await TimeoutManager.WaitFor(time, CancellationToken).ConfigureAwait(false);
 

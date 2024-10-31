@@ -5,6 +5,7 @@ using Raven.Client.Documents.Operations.TimeSeries;
 using Raven.Server.ServerWide.Context;
 using Sparrow.Binary;
 using Sparrow.Json;
+using Sparrow.Logging;
 using Sparrow.Server;
 using Sparrow.Server.Utils;
 using Voron;
@@ -394,11 +395,17 @@ namespace Raven.Server.Documents.TimeSeries
             }
         }
 
-        public IEnumerable<Slice> GetTimeSeriesByPolicyFromStartDate(DocumentsOperationContext context, CollectionName collection, string policy, DateTime start, long take)
+        public IEnumerable<Slice> GetTimeSeriesByPolicyFromStartDate(DocumentsOperationContext context, CollectionName collection, string policy, DateTime start, long take, Logger logger, string databaseName)
         {
             var table = GetOrCreateTable(context.Transaction.InnerTransaction, collection);
             if (table == null)
+            {
+                if (logger.IsOperationsEnabled)
+                {
+                    logger.Operations($"{databaseName}: GetTimeSeriesByPolicyFromStartDate: the table for collection {collection} doesn't exist");
+                }
                 yield break;
+            }
 
             using (CombinePolicyNameAndTicks(context, policy.ToLowerInvariant(), start.Ticks, out var key,out var policySlice))
             {
@@ -406,13 +413,29 @@ namespace Raven.Server.Documents.TimeSeries
                 {
                     var stats = GetStats(ref result.Result.Reader);
                     if (stats.Count == 0)
+                    {
+                        if (logger.IsOperationsEnabled)
+                        {
+                            logger.Operations($"{databaseName}: GetTimeSeriesByPolicyFromStartDate: no stats for {result.Key}. skipping.");
+                        }
                         continue;
+                    }
 
                     DocumentsStorage.TableValueToSlice(context, (int)StatsColumns.Key, ref result.Result.Reader, out var slice);
                     var currentStart = new DateTime(Bits.SwapBytes(DocumentsStorage.TableValueToLong((int)StatsColumns.Start, ref result.Result.Reader)));
                     if (currentStart > start)
+                    {
+                        if (logger.IsOperationsEnabled)
+                        {
+                            logger.Operations($"{databaseName}: GetTimeSeriesByPolicyFromStartDate: currentStart({currentStart}) > start ({start}). breaking.");
+                        }
                         yield break;
+                    }
 
+                    if (logger.IsOperationsEnabled)
+                    {
+                        logger.Operations($"{databaseName}: GetTimeSeriesByPolicyFromStartDate: Collected {slice}");
+                    }
                     yield return slice;
 
                     take--;

@@ -176,16 +176,31 @@ namespace Raven.Server.Documents.TimeSeries
                 return false;
 
             var existingRollup = Bits.SwapBytes(*(long*)tvr.Read((int)RollupColumns.NextRollup, out _));
-            return existingRollup <= t.Ticks;
+            var pendingRollup = existingRollup <= t.Ticks;
+            if (pendingRollup && _logger.IsOperationsEnabled)
+            {
+                _logger.Operations($"{this._database.Name}: HasPendingRollupFrom: existingRollup ({existingRollup}) <= t.Ticks ({t.Ticks}). ({pendingRollup})");
+            }
+            return pendingRollup;
         }
 
         internal void PrepareRollups(DocumentsOperationContext context, DateTime currentTime, long take, long start, List<RollupState> states, out Stopwatch duration)
         {
+            if (_logger.IsOperationsEnabled)
+            {
+                _logger.Operations($"{this._database.Name}: In PrepareRollups");
+            }
             duration = Stopwatch.StartNew();
 
             var table = context.Transaction.InnerTransaction.OpenTable(RollupSchema, TimeSeriesRollupTable);
             if (table == null)
+            {
+                if (_logger.IsOperationsEnabled)
+                {
+                    _logger.Operations($"{this._database.Name}: In PrepareRollups: TimeSeriesRollupTable doesn't exist");
+                }
                 return;
+            }
 
             var currentTicks = currentTime.Ticks;
 
@@ -198,7 +213,13 @@ namespace Raven.Server.Documents.TimeSeries
 
                     var rollUpTime = DocumentsStorage.TableValueToEtag((int)RollupColumns.NextRollup, ref item.Result.Reader);
                     if (rollUpTime > currentTicks)
+                    {
+                        if (_logger.IsOperationsEnabled)
+                        {
+                            _logger.Operations($"{this._database.Name}: In PrepareRollups: returning because rollupTime ({rollUpTime}) > currentTicks ({currentTicks})");
+                        }
                         return;
+                    }
 
                     DocumentsStorage.TableValueToSlice(context, (int)RollupColumns.Key, ref item.Result.Reader, out var key);
                     SplitKey(key, out var docId, out var name);
