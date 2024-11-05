@@ -519,7 +519,7 @@ namespace Raven.Server.Web.System
                                     {
                                         var runningBackupStatus = new PeriodicBackupStatus { TaskId = 0, BackupType = backupConfiguration.BackupType };
                                         var backupResult = backupTask.RunPeriodicBackup(onProgress, ref runningBackupStatus);
-                                        BackupUtils.SaveBackupStatus(runningBackupStatus, Database.Name, Database.ServerStore, Logger, backupResult, operationCancelToken: cancelToken);
+                                        BackupUtils.SaveBackupStatusForLocalNode(runningBackupStatus, Database.Name, Database.ServerStore, Logger, backupResult, operationCancelToken: cancelToken);
                                         tcs.SetResult(backupResult);
                                     }
                                 }
@@ -594,7 +594,7 @@ namespace Raven.Server.Web.System
 
         private OngoingTaskBackup GetOngoingTaskBackup(long taskId, PeriodicBackupConfiguration backupConfiguration, ClusterTopology clusterTopology)
         {
-            var backupStatus = Database.PeriodicBackupRunner.GetBackupStatus(taskId);
+            var backupStatus = Database.PeriodicBackupRunner.GetBackupStatusForLocalNode(taskId);
             var nextBackup = Database.PeriodicBackupRunner.GetNextBackupDetails(backupConfiguration, backupStatus, out var responsibleNodeTag);
             var onGoingBackup = Database.PeriodicBackupRunner.OnGoingBackup(taskId);
             var backupDestinations = backupConfiguration.GetFullBackupDestinations();

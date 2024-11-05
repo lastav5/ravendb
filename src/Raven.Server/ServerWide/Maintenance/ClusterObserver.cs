@@ -581,9 +581,14 @@ namespace Raven.Server.ServerWide.Maintenance
             {
                 foreach (var taskId in periodicBackupTaskIds)
                 {
-                    var singleBackupStatus = _server.Cluster.Read(context, PeriodicBackupStatus.GenerateItemName(databaseName, taskId));
+                    //TODO stav: what if responsible node is deleted and so there is no backup status for it anymore? so we have no backup, but we will delete the files
+
+                    var singleBackupStatus = BackupUtils.GetBackupStatusOfResponsibleNodeBlittable(_server, context, databaseName, taskId);
                     if (singleBackupStatus == null)
+                    {
+                        Console.WriteLine($"Observer: GetMaxCompareExchangeTombstonesEtagToDelete: No backup status exists");
                         continue;
+                    }
 
                     if (singleBackupStatus.TryGet(nameof(PeriodicBackupStatus.LastFullBackupInternal), out DateTime? lastFullBackupInternal) == false ||
                         lastFullBackupInternal == null)

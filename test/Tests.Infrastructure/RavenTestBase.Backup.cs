@@ -60,7 +60,11 @@ namespace FastTests
                 BackupResult result = default;
                 var actual = await WaitForValueAsync(async () =>
                 {
-                    var state = await store.Maintenance.SendAsync(new GetOperationStateOperation(op));
+                    //TODO stav: this NREs if the responsible node is not the first in topology of the store (this ep has no redirecting)
+                    //var state = await store.Maintenance.SendAsync(new GetOperationStateOperation(op));
+
+                    var state = documentDatabase.Operations.GetOperation(op).State;
+
                     result = state.Result as BackupResult;
                     return state.Status;
                 }, opStatus, timeout: timeout ?? _reasonableTimeout);
@@ -257,11 +261,11 @@ namespace FastTests
                 return backupTaskId;
             }
 
-            public void WaitForResponsibleNodeUpdateInCluster(DocumentStore store, List<RavenServer> nodes, long backupTaskId)
+            public void WaitForResponsibleNodeUpdateInCluster(DocumentStore store, List<RavenServer> nodes, long backupTaskId, string differentThan = null)
             {
                 foreach (var server in nodes)
                 {
-                    WaitForResponsibleNodeUpdate(server.ServerStore, store.Database, backupTaskId);
+                    WaitForResponsibleNodeUpdate(server.ServerStore, store.Database, backupTaskId, differentThan);
                 }
             }
 

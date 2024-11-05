@@ -275,7 +275,7 @@ namespace Raven.Server.Documents.PeriodicBackup
                         // save the backup status
                         // create a local copy of ref `runningBackupStatus` so that it can be used in the anonymous method.
                         var status = runningBackupStatus;
-                        BackupUtils.SaveBackupStatus(status, Database.Name, Database.ServerStore, _logger, BackupResult, _onProgress, TaskCancelToken);
+                        BackupUtils.SaveBackupStatusForLocalNode(status, Database.Name, Database.ServerStore, _logger, BackupResult, _onProgress, TaskCancelToken);
                     }
                 }
             }

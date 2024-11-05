@@ -1,4 +1,5 @@
 ﻿using System;
+using Nest;
 using Raven.Client.Documents.Operations.Backups;
 using Raven.Client.ServerWide;
 using Raven.Client.ServerWide.Operations.Configuration;
@@ -9,6 +10,7 @@ using Sparrow.Json.Parsing;
 using Sparrow.Logging;
 using Voron;
 using Voron.Data.Tables;
+using static Raven.Server.Utils.BackupUtils;
 
 namespace Raven.Server.ServerWide.Commands.PeriodicBackup
 {
@@ -66,13 +68,24 @@ namespace Raven.Server.ServerWide.Commands.PeriodicBackup
         {
             if (_shouldRemoveBackupStatus == false)
                 return;
+            
+            var taskNameOld = BackupStatusKeys.GenerateItemNameLegacy(DatabaseName, Configuration.TaskId);
+            var taskName = BackupStatusKeys.GenerateItemNamePrefix(DatabaseName, Configuration.TaskId);
 
-            var taskName = PeriodicBackupStatus.GenerateItemName(DatabaseName, Configuration.TaskId);
-
-            using (Slice.From(ctx.Allocator, taskName, out Slice _))
-            using (Slice.From(ctx.Allocator, taskName.ToLowerInvariant(), out Slice keyNameLowered))
+            if (ClusterCommandsVersionManager.CurrentClusterMinimalVersion >= SeparateBackupStatusVersion)
             {
-                items.DeleteByKey(keyNameLowered);
+                using (Slice.From(ctx.Allocator, taskName.ToLowerInvariant(), out Slice backupStatusPrefix))
+                {
+                    items.DeleteByPrimaryKeyPrefix(backupStatusPrefix);
+                }
+            }
+            else
+            {
+                using (Slice.From(ctx.Allocator, taskNameOld.ToLowerInvariant(), out Slice backupStatusLegacyKey))
+                {
+                    // for backwards compatibility, old backup status was stored without closing slash
+                    items.DeleteByKey(backupStatusLegacyKey);
+                }
             }
         }
 

@@ -6,7 +6,10 @@ using Raven.Server.Documents;
 using Raven.Server.Documents.PeriodicBackup;
 using Raven.Server.Routing;
 using Raven.Server.ServerWide.Context;
+using Raven.Server.Utils;
 using Sparrow.Json;
+using Sparrow.Json.Parsing;
+using static Raven.Server.Utils.BackupUtils;
 
 namespace Raven.Server.Web.System
 {
@@ -37,7 +40,7 @@ namespace Raven.Server.Web.System
         }
 
         [RavenAction("/periodic-backup/status", "GET", AuthorizationStatus.ValidUser, EndpointType.Read)]
-        public async Task GetPeriodicBackupStatus()
+        public async Task GetPeriodicBackupStatus()//TODO stav: check this GET backup status ep
         {
             var name = GetQueryStringValueAndAssertIfSingleAndNotEmpty("name");
 
@@ -48,16 +51,22 @@ namespace Raven.Server.Web.System
 
             using (ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
             using (context.OpenReadTransaction())
-            using (var statusBlittable = ServerStore.Cluster.Read(context, PeriodicBackupStatus.GenerateItemName(name, taskId.Value)))
+            using (var statusBlittable = BackupUtils.GetBackupStatusOfResponsibleNodeBlittable(ServerStore, context, name, taskId.Value)) //TODO stav: get by responsible node here instead
             await using (var writer = new AsyncBlittableJsonTextWriter(context, ResponseBodyStream()))
             {
                 writer.WriteStartObject();
                 writer.WritePropertyName(nameof(GetPeriodicBackupStatusOperationResult.Status));
                 writer.WriteObject(statusBlittable);
+                
+                var allStatuses = BackupUtils.GetBackupStatusesOfAllNodesBlittables(ServerStore, context, name, taskId.Value);
+                writer.WriteComma();
+                writer.WriteArray("AllStatuses", allStatuses);
                 writer.WriteEndObject();
             }
-        }
 
+            //TODO stav: mark obsolete? add list to Result object?
+        }
+        //TODO stav: need to delete status when node is removed from db/cluster?
         [RavenAction("/admin/debug/periodic-backup/timers", "GET", AuthorizationStatus.Operator)]
         public async Task GetAllPeriodicBackupsTimers()
         {

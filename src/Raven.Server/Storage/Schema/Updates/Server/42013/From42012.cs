@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Raven.Client.Documents.Operations.Backups;
 using Raven.Server.ServerWide;
+using Raven.Server.Utils;
 using Sparrow.Json;
 using Sparrow.Json.Parsing;
 using Voron;
@@ -35,7 +36,7 @@ namespace Raven.Server.Storage.Schema.Updates.Server
                     dbs.Add(ClusterStateMachine.GetCurrentItemKey(result.Value).Substring(dbKey.Length));
                 }
             }
-
+            
             step.WriteTx.CreateTree(ClusterStateMachine.CompareExchangeIndex);
 
             foreach (var db in dbs)
@@ -94,10 +95,10 @@ namespace Raven.Server.Storage.Schema.Updates.Server
                     var databaseRecord = JsonDeserializationCluster.DatabaseRecord(databaseRecordJson);
                     if (databaseRecord == null)
                         continue;
-
+                    
                     foreach (var pb in databaseRecord.PeriodicBackups)
                     {
-                        var pbItemName = PeriodicBackupStatus.GenerateItemName(db, pb.TaskId);
+                        var pbItemName = BackupUtils.BackupStatusKeys.GenerateItemNameLegacy(db, pb.TaskId);
                         using (Slice.From(step.WriteTx.Allocator, pbItemName, out Slice pbsSlice))
                         using (Slice.From(step.WriteTx.Allocator, pbItemName.ToLowerInvariant(), out Slice pbsSliceLower))
                         {
@@ -139,6 +140,26 @@ namespace Raven.Server.Storage.Schema.Updates.Server
                                 builder.Add(index);
 
                                 items.Set(builder);
+                            }
+
+                            // TODO stav: move this to the right schema upgrades
+                            // Save the status under key that contains the db-id as well (for per-node backup status)
+                            var dbId = step.DocumentsStorage.Environment.Base64Id;
+                            if (singleBackupStatus.TryGet(nameof(PeriodicBackupStatus.NodeTag), out string nodeTag) &&
+                                nodeTag == dbId)
+                            {
+                                var bsPerDbIdKey = BackupUtils.BackupStatusKeys.GenerateItemNameForBackupStatusPerDbId(db, pb.TaskId, dbId);
+                                using (Slice.From(step.WriteTx.Allocator, bsPerDbIdKey, out Slice bsPerDbIdSlice))
+                                using (Slice.From(step.WriteTx.Allocator, bsPerDbIdKey.ToLowerInvariant(), out Slice bsPerDbIdSliceLower))
+                                using (items.Allocate(out var builder))
+                                {
+                                    builder.Add(bsPerDbIdSliceLower);
+                                    builder.Add(bsPerDbIdSlice);
+                                    builder.Add(singleBackupStatus.BasePointer, singleBackupStatus.Size);
+                                    builder.Add(index);
+
+                                    items.Set(builder);
+                                }
                             }
                         }
                     }

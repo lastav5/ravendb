@@ -156,7 +156,7 @@ internal partial class ClusterObserver
     {
         var lastResponsibleNode = currentResponsibleNode ??
                                   // backward compatibility - will continue running the backup on the last node that ran the backup
-                                  BackupUtils.GetBackupStatusFromCluster(_server, context, databaseName, configuration.TaskId)?.NodeTag;
+                                  BackupUtils.GetBackupStatusFromClusterLegacy(_server, context, databaseName, configuration.TaskId)?.NodeTag;
 
         var mentorNode = configuration.GetMentorNode();
         if (mentorNode != null)

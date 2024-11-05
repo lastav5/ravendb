@@ -3396,7 +3396,7 @@ namespace SlowTests.Server.Documents.PeriodicBackup
                             PeriodicBackupStatus inMemoryStatus = null;
                             WaitForValue(() =>
                             {
-                                inMemoryStatus = documentDatabase.PeriodicBackupRunner.GetBackupStatus(taskId);
+                                inMemoryStatus = documentDatabase.PeriodicBackupRunner.GetBackupStatusForLocalNode(taskId);
                                 return inMemoryStatus != null;
                             }, true);
 

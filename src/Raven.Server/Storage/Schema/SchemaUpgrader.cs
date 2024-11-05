@@ -104,7 +104,7 @@ namespace Raven.Server.Storage.Schema
                     var msg = $"Started schema upgrade from version #{updater.From} to version #{updater.To}";
                     _documentsStorage.DocumentDatabase.AddToInitLog?.Invoke(LogMode.Information, msg);
                 }
-
+                
                 bool result =  updater.Update(new UpdateStep(transactions)
                 {
                     ConfigurationStorage = _configurationStorage,

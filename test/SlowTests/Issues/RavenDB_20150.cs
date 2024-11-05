@@ -8,6 +8,7 @@ using Raven.Client.Documents.Operations.CompareExchange;
 using Raven.Client.Documents.Session;
 using Raven.Server.Config;
 using Raven.Server.ServerWide.Context;
+using Raven.Server.Utils;
 using Raven.Tests.Core.Utils.Entities;
 using Sparrow.Json;
 using Tests.Infrastructure;
@@ -82,7 +83,7 @@ public class RavenDB_20150 : ClusterTestBase
                     using (dbServer.ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
                     using (context.OpenReadTransaction())
                     {
-                        var itemName = PeriodicBackupStatus.GenerateItemName(database, result.TaskId);
+                        var itemName = BackupUtils.BackupStatusKeys.GenerateItemNameLegacy(database, result.TaskId);
                         var status = dbServer.ServerStore.Cluster.Read(context, itemName);
                         if (status == null)
                             return false;

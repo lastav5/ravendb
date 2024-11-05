@@ -18,6 +18,10 @@ namespace Raven.Server.ServerWide.Commands
 
         protected abstract UpdatedValue GetUpdatedValue(long index, RawDatabaseRecord record, JsonOperationContext context, BlittableJsonReaderObject existingValue);
 
+        protected virtual void AfterExecuteCommand(ClusterOperationContext context, long index, Table items)
+        {
+        }
+
         public virtual unsafe void Execute(ClusterOperationContext context, Table items, long index, RawDatabaseRecord record, RachisState state, out object result)
         {
             result = null;
@@ -57,6 +61,8 @@ namespace Raven.Server.ServerWide.Commands
             {
                 ClusterStateMachine.UpdateValue(index, items, valueNameLowered, valueName, updatedValue.Value);
             }
+
+            AfterExecuteCommand(context, index, items);
         }
 
         public virtual object GetState()

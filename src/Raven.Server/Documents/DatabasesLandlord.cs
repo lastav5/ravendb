@@ -1127,9 +1127,12 @@ namespace Raven.Server.Documents
                         case IdleDatabaseActivityType.UpdateBackupStatusOnly:
                             PeriodicBackupStatus backupStatus;
 
+                            // next activity holds details regarding backups running on local node only, so we can fetch the status for this node
                             using (_serverStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
                             using (context.OpenReadTransaction())
-                                backupStatus = BackupUtils.GetBackupStatusFromCluster(_serverStore, context, databaseName, nextIdleDatabaseActivity.TaskId);
+                                backupStatus = BackupUtils.GetBackupStatusFromClusterPerDbId(_serverStore, context, databaseName, nextIdleDatabaseActivity.TaskId, _serverStore._env.Base64Id);
+
+                            Debug.Assert(backupStatus != null);
 
                             backupStatus.LastIncrementalBackup = backupStatus.LastIncrementalBackupInternal = nextIdleDatabaseActivity.DateTime;
                             backupStatus.LocalBackup.LastIncrementalBackup = nextIdleDatabaseActivity.DateTime;
@@ -1138,7 +1141,7 @@ namespace Raven.Server.Documents
                             var backupResult = new BackupResult();
                             backupResult.AddMessage($"Skipping incremental backup because no changes were made from last full backup on {backupStatus.LastFullBackup}.");
 
-                            BackupUtils.SaveBackupStatus(backupStatus, databaseName, _serverStore, _logger, backupResult);
+                            BackupUtils.SaveBackupStatusForLocalNode(backupStatus, databaseName, _serverStore, _logger, backupResult);
 
                             nextIdleDatabaseActivity = BackupUtils.GetEarliestIdleDatabaseActivity(new BackupUtils.EarliestIdleDatabaseActivityParameters
                             {

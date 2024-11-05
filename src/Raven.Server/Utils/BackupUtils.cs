@@ -18,6 +18,7 @@ using Raven.Server.Config.Settings;
 using Raven.Server.Documents;
 using Raven.Server.Documents.PeriodicBackup;
 using Raven.Server.Documents.PeriodicBackup.DirectUpload;
+using Raven.Server.Monitoring.Snmp;
 using Raven.Server.Rachis;
 using Raven.Server.ServerWide;
 using Raven.Server.ServerWide.Commands.PeriodicBackup;
@@ -33,6 +34,9 @@ namespace Raven.Server.Utils;
 
 internal static class BackupUtils
 {
+    //TODO stav: need the accurate version because we are dealing with diff 5.4 versions + where to put this
+    public const int SeparateBackupStatusVersion = 54_000;
+
     internal static BackupTask GetBackupTask(DocumentDatabase database, BackupParameters backupParameters, BackupConfiguration configuration, Logger logger, PeriodicBackupRunner.TestingStuff forTestingPurposes = null)
     {
         return configuration.BackupUploadMode == BackupUploadMode.DirectUpload
@@ -79,9 +83,11 @@ internal static class BackupUtils
         }
     }
 
-    internal static BackupInfo GetBackupInfo(BackupInfoParameters parameters)
+    internal static BackupInfo GetBackupsInfoForDatabase(BackupInfoParameters parameters)
     {
-        var oneTimeBackupStatus = GetBackupStatusFromCluster(parameters.ServerStore, parameters.Context, parameters.DatabaseName, taskId: 0L);
+        // backup status with taskId 0 is for backup database once
+        // since backup once doesn't have a responsible node, we will fetch the latest one across all nodes
+        var oneTimeBackupStatus = GetLatestBackupStatus(parameters.ServerStore, parameters.Context, parameters.DatabaseName, taskId: 0L);
 
         if (parameters.PeriodicBackups.Count == 0 && oneTimeBackupStatus == null)
             return null;
@@ -97,10 +103,11 @@ internal static class BackupUtils
 
         foreach (var periodicBackup in parameters.PeriodicBackups)
         {
-            var status = ComparePeriodicBackupStatus(periodicBackup.Configuration.TaskId,
-                backupStatus: GetBackupStatusFromCluster(parameters.ServerStore, parameters.Context, parameters.DatabaseName, periodicBackup.Configuration.TaskId),
-                inMemoryBackupStatus: periodicBackup.BackupStatus);
-
+            // if no backup status exists at all for the responsible node and no in-memory either,
+            // this will just return a mock instance to calculate the next occurence
+            var status = GetOrCreateMostUpdatedBackupStatusForResponsibleNode(periodicBackup.Configuration.TaskId, periodicBackup.BackupStatus, parameters.ServerStore,
+                parameters.DatabaseName, parameters.Context);
+            
             if (status.LastFullBackup != null && status.LastFullBackup.Value.Ticks > lastBackup)
             {
                 lastBackup = status.LastFullBackup.Value.Ticks;
@@ -118,9 +125,10 @@ internal static class BackupUtils
                 // OnParsingError and OnMissingNextBackupInfo are null's - for skipping error messages notification and log
                 Configuration = periodicBackup.Configuration,
                 BackupStatus = status,
-                ResponsibleNodeTag = parameters.ServerStore.NodeTag,
+                ResponsibleNodeTag = GetResponsibleNodeTag(parameters.ServerStore, parameters.DatabaseName, periodicBackup.Configuration.TaskId, parameters.Context),
                 NodeTag = parameters.ServerStore.NodeTag
             });
+
             if (nextBackup == null)
                 continue;
 
@@ -137,9 +145,50 @@ internal static class BackupUtils
         };
     }
 
-    internal static PeriodicBackupStatus GetBackupStatusFromCluster(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
+    public static class BackupStatusKeys
     {
-        var statusBlittable = serverStore.Cluster.Read(context, PeriodicBackupStatus.GenerateItemName(databaseName, taskId));
+        public static string Prefix => "periodic-backups/";
+
+        public static string GenerateItemNameForBackupStatusPerDbId(string databaseName, long taskId, string databaseId)
+        {
+            return $"{GenerateItemNamePrefix(databaseName, taskId)}{databaseId}/";
+        }
+
+        public static string GenerateItemNameLegacy(string databaseName, long taskId)
+        {
+            return $"values/{databaseName}/{Prefix}{taskId}";
+        }
+
+        public static string GenerateItemNamePrefix(string databaseName, long taskId)
+        {
+            return $"values/{databaseName}/{Prefix}{taskId}/";
+        }
+    }
+
+    internal static IEnumerable<BlittableJsonReaderObject> GetBackupStatusesOfAllNodesBlittables(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
+    {
+        return serverStore.Cluster.GetAllBackupStatusForTaskId(serverStore, context, databaseName, taskId);
+    }
+    
+    //TODO stav: possible to move PeriodicBackupStatus to server if remove the endpoint?
+    internal static PeriodicBackupStatus GetBackupStatusFromClusterLegacy(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
+    {
+        return GetBackupStatusFromCluster(serverStore, context, BackupStatusKeys.GenerateItemNameLegacy(databaseName, taskId));
+    }
+
+    internal static BlittableJsonReaderObject GetBackupStatusFromClusterBlittableLegacy(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
+    {
+        return GetBackupStatusFromClusterBlittable(serverStore, context, BackupStatusKeys.GenerateItemNameLegacy(databaseName, taskId));
+    }
+
+    internal static PeriodicBackupStatus GetBackupStatusFromClusterPerDbId(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId, string databaseId)
+    {
+        return GetBackupStatusFromCluster(serverStore, context, BackupStatusKeys.GenerateItemNameForBackupStatusPerDbId(databaseName, taskId, databaseId));
+    }
+
+    internal static PeriodicBackupStatus GetBackupStatusOfResponsibleNode(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
+    {
+        var statusBlittable = GetBackupStatusOfResponsibleNodeBlittable(serverStore, context, databaseName, taskId);
 
         if (statusBlittable == null)
             return null;
@@ -148,10 +197,64 @@ internal static class BackupUtils
         return periodicBackupStatusJson;
     }
 
+    internal static BlittableJsonReaderObject GetBackupStatusOfResponsibleNodeBlittable(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
+    {
+        if (ClusterCommandsVersionManager.CurrentClusterMinimalVersion < SeparateBackupStatusVersion)
+            return GetBackupStatusFromClusterBlittableLegacy(serverStore, context, databaseName, taskId);
+
+        //TODO stav: maybe add dbid to responsible node info class and use it -> problematic since we only have a list of members as strings when we choose it
+        var responsibleNode = GetResponsibleNodeTag(serverStore, databaseName, taskId, context);
+
+        if (responsibleNode == null)
+            return null;
+
+        return ClusterStateMachine.GetBackupStatusByNodeTag(serverStore, context, databaseName, taskId, responsibleNode);
+    }
+
+    //internal static PeriodicBackupStatus GetBackupStatusByNodeTag(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId, string nodeTag)
+    //{
+    //    if (nodeTag == null)
+    //        return null;
+
+    //    var statusBlittable = serverStore.Cluster.GetBackupStatusByNodeTag(context, databaseName, taskId, nodeTag);
+
+    //    var periodicBackupStatusJson = JsonDeserializationClient.PeriodicBackupStatus(statusBlittable);
+    //    return periodicBackupStatusJson;
+    //}
+
+    private static PeriodicBackupStatus GetBackupStatusFromCluster(ServerStore serverStore, TransactionOperationContext context, string key)
+    {
+        var statusBlittable = GetBackupStatusFromClusterBlittable(serverStore, context, key);
+
+        if (statusBlittable == null)
+            return null;
+
+        var periodicBackupStatusJson = JsonDeserializationClient.PeriodicBackupStatus(statusBlittable);
+        return periodicBackupStatusJson;
+    }
+
+    private static BlittableJsonReaderObject GetBackupStatusFromClusterBlittable(ServerStore serverStore, TransactionOperationContext context, string key)
+    {
+        return serverStore.Cluster.Read(context, key);
+    }
+
     internal static BlittableJsonReaderObject GetResponsibleNodeInfoFromCluster(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
     {
         var responsibleNodeBlittable = serverStore.Cluster.Read(context, ResponsibleNodeInfo.GenerateItemName(databaseName, taskId));
         return responsibleNodeBlittable;
+    }
+
+    internal static PeriodicBackupStatus GetLatestBackupStatus(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId)
+    {
+        if (ClusterCommandsVersionManager.CurrentClusterMinimalVersion < SeparateBackupStatusVersion)
+            return GetBackupStatusFromClusterLegacy(serverStore, context, databaseName, taskId);
+
+        var statusBlittable = ClusterStateMachine.GetLatestBackupStatus(serverStore, context, databaseName, taskId);
+
+        if (statusBlittable == null)
+            return null;
+        //TODO stav: can dispose the blittable?
+        return JsonDeserializationClient.PeriodicBackupStatus(statusBlittable);
     }
 
     internal static long GetTasksCountOnNode(ServerStore serverStore, string databaseName, TransactionOperationContext context)
@@ -173,6 +276,16 @@ internal static class BackupUtils
         return count;
     }
 
+    internal static string GetResponsibleNodeTag(ServerStore serverStore, string databaseName, long taskId, TransactionOperationContext context)
+    {
+        var blittable = GetResponsibleNodeInfoFromCluster(serverStore, context, databaseName, taskId);
+        if (blittable == null)
+            return null;
+
+        blittable.TryGet(nameof(ResponsibleNodeInfo.ResponsibleNode), out string responsibleNodeTag);
+        return responsibleNodeTag;
+    }
+
     internal static string GetResponsibleNodeTag(ServerStore serverStore, string databaseName, long taskId)
     {
         using (serverStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
@@ -187,20 +300,66 @@ internal static class BackupUtils
         }
     }
 
-    internal static PeriodicBackupStatus ComparePeriodicBackupStatus(long taskId, PeriodicBackupStatus backupStatus, PeriodicBackupStatus inMemoryBackupStatus)
+    internal static PeriodicBackupStatus GetOrCreateMostUpdatedBackupStatusForLocalNode(long taskId, PeriodicBackupStatus inMemoryBackupStatus, ServerStore serverStore,
+        string databaseName)
     {
-        if (backupStatus == null)
+        using (serverStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
+        using (context.OpenReadTransaction())
         {
-            backupStatus = inMemoryBackupStatus ?? new PeriodicBackupStatus { TaskId = taskId };
+            return GetOrCreateMostUpdatedBackupStatusForLocalNode(taskId, inMemoryBackupStatus, serverStore, databaseName, context);
         }
-        else if (inMemoryBackupStatus?.Version > backupStatus.Version && inMemoryBackupStatus.NodeTag == backupStatus.NodeTag)
+    }
+    
+    internal static PeriodicBackupStatus GetOrCreateMostUpdatedBackupStatusForLocalNode(long taskId, PeriodicBackupStatus inMemoryBackupStatus, ServerStore serverStore,
+        string databaseName, TransactionOperationContext context)
+    {
+        var backupStatusFromCluster = GetBackupStatusFromClusterPerDbId(serverStore, context, databaseName, taskId, serverStore._env.Base64Id);
+        return GetOrCreateMostUpdatedBackupStatus(taskId, backupStatusFromCluster, inMemoryBackupStatus, serverStore, databaseName, context, responsibleNodeToSet: serverStore.NodeTag);
+    }
+
+    internal static PeriodicBackupStatus GetOrCreateMostUpdatedBackupStatusForResponsibleNode(long taskId, PeriodicBackupStatus inMemoryBackupStatus, ServerStore serverStore,
+        string databaseName, TransactionOperationContext context)
+    {
+        var backupStatusOfResponsibleNode = GetBackupStatusOfResponsibleNode(serverStore, context, databaseName, taskId);
+        var responsibleNodeToSet = GetResponsibleNodeTag(serverStore, databaseName, taskId);
+        return GetOrCreateMostUpdatedBackupStatus(taskId, backupStatusOfResponsibleNode, inMemoryBackupStatus, serverStore, databaseName, context,
+            responsibleNodeToSet);
+    }
+
+    private static PeriodicBackupStatus GetOrCreateMostUpdatedBackupStatus(long taskId, PeriodicBackupStatus backupStatusFromCluster, PeriodicBackupStatus inMemoryBackupStatus, ServerStore serverStore,
+        string databaseName, TransactionOperationContext context, string responsibleNodeToSet)
+    {
+        if (backupStatusFromCluster == null)
+        {
+            return inMemoryBackupStatus ?? InitializeNewBackupStatus(serverStore, context, databaseName, taskId, responsibleNodeToSet);
+        }
+        
+        if (inMemoryBackupStatus?.Version > backupStatusFromCluster.Version && inMemoryBackupStatus?.NodeTag == backupStatusFromCluster.NodeTag)
         {
             // the in memory backup status is more updated
             // and is of the same node (current one)
-            backupStatus = inMemoryBackupStatus;
+            return inMemoryBackupStatus;
         }
 
-        return backupStatus;
+        return backupStatusFromCluster;
+    }
+
+    private static PeriodicBackupStatus InitializeNewBackupStatus(ServerStore serverStore, TransactionOperationContext context, string databaseName, long taskId, string responsibleNodeToSet)
+    {
+        var originalBackupStatus = GetLatestBackupStatus(serverStore, context, databaseName, taskId);
+        if (originalBackupStatus == null)
+        {
+            // there was never a backup
+            return new PeriodicBackupStatus() { TaskId = taskId };
+        }
+        
+        return new PeriodicBackupStatus()
+        {
+            TaskId = taskId,
+            DelayUntil = originalBackupStatus.DelayUntil,
+            IsEncrypted = originalBackupStatus.IsEncrypted,
+            NodeTag = responsibleNodeToSet
+        };
     }
 
     private static List<string> AddDestinations(PeriodicBackupStatus backupStatus)
@@ -423,19 +582,6 @@ internal static class BackupUtils
             parameters.Configuration.HasBackup() == false)
             return null;
 
-        var backupStatus = GetBackupStatusFromCluster(parameters.ServerStore, parameters.Context, parameters.DatabaseName, parameters.Configuration.TaskId);
-
-        if (backupStatus == null && parameters.IsIdle == false)
-        {
-            // we might reach here from periodic backup runner that check whether due time is far enough in the future to justify unloading the db
-            // if we never backed up the db then we want to do it now. returning the time now will prevent the unloading
-            
-            if (parameters.Logger.IsOperationsEnabled)
-                parameters.Logger.Operations($"Backup Task '{parameters.Configuration.TaskId}' of database '{parameters.DatabaseName}' is never backed up yet.");
-            
-            return new IdleDatabaseActivity(IdleDatabaseActivityType.WakeUpDatabase, DateTime.UtcNow);
-        }
-
         var responsibleNodeTag = GetResponsibleNodeTag(parameters.ServerStore, parameters.DatabaseName, parameters.Configuration.TaskId);
         if (responsibleNodeTag == null)
         {
@@ -445,7 +591,7 @@ internal static class BackupUtils
             
             return null;
         }
-
+        
         if (responsibleNodeTag != parameters.ServerStore.NodeTag)
         {
             // not responsible for this backup task
@@ -453,6 +599,20 @@ internal static class BackupUtils
                 parameters.Logger.Operations($"Current server '{parameters.ServerStore.NodeTag}' is not responsible node for backup task '{parameters.Configuration.TaskId}' of database '{parameters.DatabaseName}'. Backup Task responsible node is '{responsibleNodeTag}'.");
 
             return null;
+        }
+
+        // if we reached here then this is the responsible node, so we can fetch from this db id
+        var backupStatus = GetBackupStatusFromClusterPerDbId(parameters.ServerStore, parameters.Context, parameters.DatabaseName, parameters.Configuration.TaskId, parameters.ServerStore._env.Base64Id);
+
+        if (backupStatus == null && parameters.IsIdle == false)
+        {
+            // we might reach here from periodic backup runner that check whether due time is far enough in the future to justify unloading the db
+            // if we never backed up the db then we want to do it now. returning the time now will prevent the unloading
+
+            if (parameters.Logger.IsOperationsEnabled)
+                parameters.Logger.Operations($"Backup Task '{parameters.Configuration.TaskId}' of database '{parameters.DatabaseName}' is never backed up yet.");
+
+            return new IdleDatabaseActivity(IdleDatabaseActivityType.WakeUpDatabase, DateTime.UtcNow);
         }
 
         var nextBackup = GetNextBackupDetails(new NextBackupDetailsParameters
@@ -530,13 +690,13 @@ internal static class BackupUtils
 
         return new IdleDatabaseActivity(IdleDatabaseActivityType.UpdateBackupStatusOnly, nextBackup.DateTime, parameters.Configuration.TaskId, parameters.LastEtag);
     }
-
-    public static void SaveBackupStatus(PeriodicBackupStatus status, string databaseName, ServerStore serverStore, Logger logger,
+    
+    public static void SaveBackupStatusForLocalNode(PeriodicBackupStatus status, string databaseName, ServerStore serverStore, Logger logger,
         BackupResult backupResult = default, Action<IOperationProgress> onProgress = default, OperationCancelToken operationCancelToken = default)
     {
         try
         {
-            var command = new UpdatePeriodicBackupStatusCommand(databaseName, RaftIdGenerator.NewId()) { PeriodicBackupStatus = status };
+            var command = new UpdatePeriodicBackupStatusCommand(serverStore._env.Base64Id, databaseName, RaftIdGenerator.NewId()) { PeriodicBackupStatus = status };
 
             AsyncHelpers.RunSync(async () =>
             {

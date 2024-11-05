@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Raven.Client.Documents.Operations.Backups;
 using Raven.Server.ServerWide;
+using Raven.Server.Utils;
 using Sparrow.Json;
 using Sparrow.Json.Parsing;
 using Voron;
@@ -95,7 +96,7 @@ namespace Raven.Server.Storage.Schema.Updates.Server
 
                     foreach (var pb in databaseRecord.PeriodicBackups)
                     {
-                        var pbItemName = PeriodicBackupStatus.GenerateItemName(db, pb.TaskId);
+                        var pbItemName = BackupUtils.BackupStatusKeys.GenerateItemNameLegacy(db, pb.TaskId);
                         using (Slice.From(step.WriteTx.Allocator, pbItemName, out Slice pbsSlice))
                         using (Slice.From(step.WriteTx.Allocator, pbItemName.ToLowerInvariant(), out Slice pbsSliceLower))
                         {

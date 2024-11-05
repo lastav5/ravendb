@@ -6,6 +6,8 @@ namespace Raven.Client.Documents.Operations.Backups
 {
     public class PeriodicBackupStatus : IDatabaseTaskStatus
     {
+        public string DbId { get; set; }
+
         public long TaskId { get; set; }
 
         public BackupType BackupType { get; set; }
@@ -93,13 +95,6 @@ namespace Raven.Client.Documents.Operations.Backups
             json[nameof(LastOperationId)] = LastOperationId;
             json[nameof(LastDatabaseChangeVector)] = LastDatabaseChangeVector;
             json[nameof(IsEncrypted)] = IsEncrypted;
-        }
-
-        public static string Prefix => "periodic-backups/";
-
-        public static string GenerateItemName(string databaseName, long taskId)
-        {
-            return $"values/{databaseName}/{Prefix}{taskId}";
         }
     }
 

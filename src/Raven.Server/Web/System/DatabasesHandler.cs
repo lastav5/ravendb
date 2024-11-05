@@ -517,7 +517,7 @@ namespace Raven.Server.Web.System
                             periodicBackups.Add(new PeriodicBackup
                             {
                                 Configuration = periodicBackupConfiguration,
-                                BackupStatus = BackupUtils.GetBackupStatusFromCluster(ServerStore, context, databaseName, periodicBackupConfiguration.TaskId)
+                                BackupStatus = BackupUtils.GetBackupStatusOfResponsibleNode(ServerStore, context, databaseName, periodicBackupConfiguration.TaskId)
                             });
                         }
 
@@ -529,7 +529,7 @@ namespace Raven.Server.Web.System
                             [nameof(DatabaseInfo.NodesTopology)] = nodesTopology.ToJson(),
                             [nameof(DatabaseInfo.DeletionInProgress)] = DynamicJsonValue.Convert(dbRecord.DeletionInProgress),
                             [nameof(DatabaseInfo.Environment)] = studioEnvironment,
-                            [nameof(DatabaseInfo.BackupInfo)] = BackupUtils.GetBackupInfo(
+                            [nameof(DatabaseInfo.BackupInfo)] = BackupUtils.GetBackupsInfoForDatabase(
                                 new BackupUtils.BackupInfoParameters()
                                 {
                                     ServerStore = ServerStore,

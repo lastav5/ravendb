@@ -7,6 +7,8 @@ namespace Raven.Client.Documents.Operations.Backups
 {
     public abstract class BackupStatus
     {
+        public string DbBase64Id { get; set; }
+
         public DateTime? LastFullBackup { get; set; }
 
         public DateTime? LastIncrementalBackup { get; set; }

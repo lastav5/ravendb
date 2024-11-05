@@ -11,6 +11,7 @@ using Sparrow.Json.Parsing;
 using Sparrow.Logging;
 using Voron;
 using Voron.Data.Tables;
+using static Raven.Server.Utils.BackupUtils;
 
 namespace Raven.Server.ServerWide.Commands
 {
@@ -42,17 +43,30 @@ namespace Raven.Server.ServerWide.Commands
                         return;
 
                     var responsibleNodeKey = ResponsibleNodeInfo.GenerateItemName(DatabaseName, _backupTaskIdToDelete.Value);
-                    Delete(responsibleNodeKey);
-
-                    var backupStatusKey = PeriodicBackupStatus.GenerateItemName(DatabaseName, _backupTaskIdToDelete.Value);
-                    Delete(backupStatusKey);
-
-                    void Delete(string key)
+                    using (Slice.From(ctx.Allocator, responsibleNodeKey, out Slice _))
+                    using (Slice.From(ctx.Allocator, responsibleNodeKey.ToLowerInvariant(), out Slice valueNameToDeleteLowered))
                     {
-                        using (Slice.From(ctx.Allocator, key, out Slice _))
-                        using (Slice.From(ctx.Allocator, key.ToLowerInvariant(), out Slice valueNameToDeleteLowered))
+                        items.DeleteByKey(valueNameToDeleteLowered);
+                    }
+
+                    
+                    if (ClusterCommandsVersionManager.CurrentClusterMinimalVersion >= 54_000)
+                    {
+                        // Delete all the per-node backup statuses that belong to this backup
+                        var backupStatusKey = BackupStatusKeys.GenerateItemNamePrefix(DatabaseName, _backupTaskIdToDelete.Value);
+                        using (Slice.From(ctx.Allocator, backupStatusKey.ToLowerInvariant(), out Slice backupStatusKeyLowered))
                         {
-                            items.DeleteByKey(valueNameToDeleteLowered);
+                            items.DeleteByPrimaryKeyPrefix(backupStatusKeyLowered);
+                        }
+                    }
+                    else
+                    {
+                        // Delete the legacy backup status
+                        var backupStatusKeyOld = BackupStatusKeys.GenerateItemNameLegacy(DatabaseName, _backupTaskIdToDelete.Value);
+
+                        using (Slice.From(ctx.Allocator, backupStatusKeyOld.ToLowerInvariant(), out Slice backupStatusKeyLoweredOld))
+                        {
+                            items.DeleteByKey(backupStatusKeyLoweredOld);
                         }
                     }
 

@@ -353,7 +353,7 @@ namespace SlowTests.Issues
                     var responsibleNodeInfo = Raven.Server.Utils.BackupUtils.GetResponsibleNodeInfoFromCluster(Server.ServerStore, context, store.Database, backupTaskId);
                     Assert.Null(responsibleNodeInfo);
 
-                    var backupStatus = Raven.Server.Utils.BackupUtils.GetBackupStatusFromCluster(Server.ServerStore, context, store.Database, backupTaskId);
+                    var backupStatus = Raven.Server.Utils.BackupUtils.GetBackupStatusFromClusterPerDbId(Server.ServerStore, context, store.Database, backupTaskId, Server.ServerStore._env.Base64Id);
                     Assert.Null(backupStatus);
                 }
             }

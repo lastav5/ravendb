@@ -36,6 +36,7 @@ using Raven.Server.Commercial;
 using Raven.Server.Config;
 using Raven.Server.Config.Categories;
 using Raven.Server.Documents;
+using Raven.Server.Documents.Replication.ReplicationItems;
 using Raven.Server.Integrations.PostgreSQL.Commands;
 using Raven.Server.Json;
 using Raven.Server.NotificationCenter.Notifications;
@@ -65,6 +66,7 @@ using Voron.Data;
 using Voron.Data.BTrees;
 using Voron.Data.Tables;
 using Voron.Impl;
+using static Raven.Server.Utils.BackupUtils;
 using Constants = Raven.Client.Constants;
 
 namespace Raven.Server.ServerWide
@@ -1897,7 +1899,7 @@ namespace Raven.Server.ServerWide
 
             foreach (var keyValue in databaseValues)
             {
-                if (keyValue.Key.StartsWith(PeriodicBackupStatus.Prefix, StringComparison.OrdinalIgnoreCase))
+                if (keyValue.Key.StartsWith(BackupStatusKeys.Prefix, StringComparison.OrdinalIgnoreCase))
                 {
                     // don't use the old backup status
                     continue;
@@ -2896,6 +2898,87 @@ namespace Raven.Server.ServerWide
                 if (items.ReadByKey(k, out tvh.Reader) == false)
                     return null;
                 return GetCurrentItem(context, tvh).Value;
+            }
+        }
+        //TODO stav: have mixed version tests
+        //TODO stav: this should probably only rely on db-id
+        public static BlittableJsonReaderObject GetBackupStatusByNodeTag(ServerStore serverStore, TransactionOperationContext context,
+            string dbName, long taskId, string nodeTag)
+        {
+            if (ClusterCommandsVersionManager.CurrentClusterMinimalVersion < SeparateBackupStatusVersion)
+                return GetBackupStatusFromClusterBlittableLegacy(serverStore, context, dbName, taskId);
+            
+            var items = context.Transaction.InnerTransaction.OpenTable(ItemsSchema, Items);
+            var backupPrefix = BackupStatusKeys.GenerateItemNamePrefix(dbName, taskId);
+
+            using (Slice.From(context.Allocator, backupPrefix.ToLower(), out Slice keySlice))
+            {
+                foreach (var (key, value) in items.SeekByPrimaryKeyPrefix(keySlice, Slices.Empty, 0))
+                {
+                    GetDataAndEtagTupleFromReader(context, value.Reader, out BlittableJsonReaderObject backupStatusBlittable, out _);
+                    
+                    if (backupStatusBlittable.TryGet(nameof(PeriodicBackupStatus.NodeTag), out string currentNodeTag) &&
+                       currentNodeTag == nodeTag)
+                        return backupStatusBlittable;
+
+                    //TODO stav: dispose the other blittables?
+                }
+            }
+
+            return null;
+        }
+
+        public static BlittableJsonReaderObject GetLatestBackupStatus(ServerStore serverStore, TransactionOperationContext context,
+            string dbName, long taskId)
+        {
+            if (ClusterCommandsVersionManager.CurrentClusterMinimalVersion < SeparateBackupStatusVersion)
+                return GetBackupStatusFromClusterBlittableLegacy(serverStore, context, dbName, taskId);
+
+            var items = context.Transaction.InnerTransaction.OpenTable(ItemsSchema, Items);
+            var backupPrefix = BackupStatusKeys.GenerateItemNamePrefix(dbName, taskId);
+
+            BlittableJsonReaderObject latestBackup = null;
+
+            using (Slice.From(context.Allocator, backupPrefix.ToLower(), out Slice keySlice))
+            {
+                var maxTime = DateTime.MinValue;
+                
+                foreach (var (key, value) in items.SeekByPrimaryKeyPrefix(keySlice, Slices.Empty, 0))
+                {
+                    GetDataAndEtagTupleFromReader(context, value.Reader, out BlittableJsonReaderObject backupStatusBlittable, out _);
+
+                    backupStatusBlittable.TryGet(nameof(PeriodicBackupStatus.LastFullBackup), out DateTime lastFullBackup);
+                    backupStatusBlittable.TryGet(nameof(PeriodicBackupStatus.LastFullBackup), out DateTime lastIncrementalBackup);
+
+                    if (maxTime < lastFullBackup || maxTime < lastIncrementalBackup)
+                    {
+                        maxTime = lastIncrementalBackup < lastFullBackup ? lastFullBackup : lastIncrementalBackup;
+                        latestBackup = backupStatusBlittable;
+                    }
+                    //TODO stav: dispose the blittables?
+                }
+            }
+
+            return latestBackup;
+        }
+
+        public IEnumerable<BlittableJsonReaderObject> GetAllBackupStatusForTaskId(ServerStore serverStore, TransactionOperationContext context,
+            string dbName, long taskId)
+        {
+            if (ClusterCommandsVersionManager.CurrentClusterMinimalVersion < SeparateBackupStatusVersion)
+                yield return GetBackupStatusFromClusterBlittableLegacy(serverStore, context, dbName, taskId); //TODO stav: will this be printed ok in the endpoint if null?
+
+            var items = context.Transaction.InnerTransaction.OpenTable(ItemsSchema, Items);
+            var backupPrefix = BackupStatusKeys.GenerateItemNamePrefix(dbName, taskId);
+
+            using (Slice.From(context.Allocator, backupPrefix, out Slice keySlice))
+            {
+                foreach (var (key, value) in items.SeekByPrimaryKeyPrefix(keySlice, Slices.Empty, 0))
+                {
+                    GetDataAndEtagTupleFromReader(context, value.Reader, out BlittableJsonReaderObject backupStatusBlittable, out _);
+
+                    yield return backupStatusBlittable;
+                }
             }
         }
 
