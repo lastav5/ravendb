@@ -407,7 +407,7 @@ namespace Raven.Server.Documents.TimeSeries
 
                 using (context.OpenReadTransaction())
                 {
-                    foreach (var item in tss.Stats.GetTimeSeriesByPolicyFromStartDate(context, collectionName, policy.Name, to, TimeSeriesRollups.TimeSeriesRetentionCommand.BatchSize))
+                    foreach (var item in tss.Stats.GetTimeSeriesByPolicyFromStartDate(context, collectionName, policy.Name, to, TimeSeriesRollups.TimeSeriesRetentionCommand.BatchSize, Logger))
                     {
                         if (RequiredForNextPolicy(context, config, policy, item, to)) 
                             continue;

@@ -5,6 +5,7 @@ using Raven.Client.Documents.Operations.TimeSeries;
 using Raven.Server.ServerWide.Context;
 using Sparrow.Binary;
 using Sparrow.Json;
+using Sparrow.Logging;
 using Sparrow.Server;
 using Sparrow.Server.Utils;
 using Voron;
@@ -394,7 +395,7 @@ namespace Raven.Server.Documents.TimeSeries
             }
         }
 
-        public IEnumerable<Slice> GetTimeSeriesByPolicyFromStartDate(DocumentsOperationContext context, CollectionName collection, string policy, DateTime start, long take)
+        public IEnumerable<Slice> GetTimeSeriesByPolicyFromStartDate(DocumentsOperationContext context, CollectionName collection, string policy, DateTime start, long take, Logger logger)
         {
             var table = GetOrCreateTable(context.Transaction.InnerTransaction, collection);
             if (table == null)
@@ -408,10 +409,15 @@ namespace Raven.Server.Documents.TimeSeries
                     if (stats.Count == 0)
                         continue;
 
-                    DocumentsStorage.TableValueToSlice(context, (int)StatsColumns.Key, ref result.Result.Reader, out var slice);
                     var currentStart = new DateTime(Bits.SwapBytes(DocumentsStorage.TableValueToLong((int)StatsColumns.Start, ref result.Result.Reader)));
                     if (currentStart > start)
+                    {
+                        if (logger.IsOperationsEnabled)
+                            logger.Operations($"Finished collecting time-series for retention. Stopped fetching at start-time {currentStart} while retention time was {start} (time-series key: `{result.Key}`).");
+
                         yield break;
+}
+                    DocumentsStorage.TableValueToSlice(context, (int)StatsColumns.Key, ref result.Result.Reader, out var slice);
 
                     yield return slice;
 
