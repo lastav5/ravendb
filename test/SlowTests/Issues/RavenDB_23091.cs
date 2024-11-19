@@ -32,8 +32,7 @@ namespace SlowTests.Issues
                         {
                             RawPolicy = raw
                         }
-                    },
-                    PolicyCheckFrequency = TimeSpan.FromSeconds(1)
+                    }
                 };
                 await store.Maintenance.SendAsync(new ConfigureTimeSeriesOperation(config));
 

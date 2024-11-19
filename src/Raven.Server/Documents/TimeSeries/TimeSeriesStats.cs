@@ -412,8 +412,8 @@ namespace Raven.Server.Documents.TimeSeries
                     var currentStart = new DateTime(Bits.SwapBytes(DocumentsStorage.TableValueToLong((int)StatsColumns.Start, ref result.Result.Reader)));
                     if (currentStart > start)
                     {
-                        if (logger.IsOperationsEnabled)
-                            logger.Operations($"Finished collecting time-series for retention. Stopped fetching at start-time {currentStart} while retention time was {start} (time-series key: `{result.Key}`).");
+                        if (logger.IsInfoEnabled)
+                            logger.Info($"Finished collecting time-series for retention. Stopped fetching at start-time {currentStart} while retention time was {start} (time-series key: `{result.Key}`).");
 
                         yield break;
 }
