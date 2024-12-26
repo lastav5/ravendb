@@ -90,10 +90,10 @@ namespace Raven.Server.ServerWide.Maintenance
 
             public static PeriodicBackupStatusReport Deserialize(BlittableJsonReaderObject backupStatus)
             {
-                var statusReport = new PeriodicBackupStatusReport();
-
                 if (backupStatus == null)
-                    return statusReport;
+                    return null;
+
+                var statusReport = new PeriodicBackupStatusReport();
 
                 if (backupStatus.TryGet(nameof(TaskId), out long? taskId) && taskId != null)
                 {
