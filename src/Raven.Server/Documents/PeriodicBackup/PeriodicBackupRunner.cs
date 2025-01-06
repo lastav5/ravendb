@@ -648,15 +648,15 @@ namespace Raven.Server.Documents.PeriodicBackup
 
                     if (localStatus == null)
                     {
-                        if (responsibleNode == _serverStore.NodeTag && _periodicBackups.TryGetValue(taskId, out var periodicBackup) && periodicBackup.RunningTask != null)
+                        if (responsibleNode == null || responsibleNode == _serverStore.NodeTag)
                         {
-                            // backup is running now, we can't delete anything
+                            // first backup might run on this node, don't delete anything until then
                             return 0;
                         }
                         else
                         {
                             // we never ran the backup and aren't in the middle of it either
-                            // our next backup on this node is going to be full, so we can delete tombstones
+                            // our next backup on this node is going to be full (first backup), so we can delete tombstones
                             continue;
                         }
                     }
