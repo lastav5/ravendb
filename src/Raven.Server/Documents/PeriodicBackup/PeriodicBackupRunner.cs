@@ -641,6 +641,13 @@ namespace Raven.Server.Documents.PeriodicBackup
                 var record = _serverStore.Cluster.ReadRawDatabaseRecord(context, _database.Name);
                 foreach (var taskId in record.PeriodicBackupsTaskIds)
                 {
+                    var config = record.GetPeriodicBackupConfiguration(taskId);
+                    if (config.IncrementalBackupFrequency == null)
+                    {
+                        // if there is no status for this, we don't need to take into account tombstones
+                        continue; // if the backup is always full, we don't need to take into account the tombstones, since we never back them up.
+                    }
+
                     var localStatus = BackupUtils.GetLocalBackupStatus(_serverStore, context, _database.Name, taskId);
                     
                     // if we are not the responsible node, we want to avoid gathering tombstones indefinitely since our local status will not be updated
@@ -660,8 +667,7 @@ namespace Raven.Server.Documents.PeriodicBackup
                             continue;
                         }
                     }
-
-                    var config = record.GetPeriodicBackupConfiguration(taskId);
+                    
                     if (responsibleNode != null && responsibleNode != _serverStore.NodeTag && config.FullBackupFrequency != null)
                     {
                         var nextFullBackup = BackupUtils.GetNextBackupOccurrence(new BackupUtils.NextBackupOccurrenceParameters()
