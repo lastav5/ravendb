@@ -1065,7 +1065,6 @@ namespace Raven.Server.Documents.PeriodicBackup
                     minLastEtag = 0; // deleting the local status did not succeed. we can't remove any tombstones because it is not guaranteed next backup will be full.
             }
 
-            Console.WriteLine($"{_serverStore.NodeTag}: PeriodicBackupRunner: minEtag: {minLastEtag}");
             if (minLastEtag == long.MaxValue)
                 return null;
 
