@@ -4,21 +4,18 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Esprima.Ast;
-using Lucene.Net.Documents;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Indexes;
 using Raven.Client.Documents.Operations.Indexes;
 using Raven.Client.ServerWide;
 using Raven.Server;
-using Raven.Server.Monitoring.Snmp;
 using Raven.Server.Rachis;
 using Raven.Server.ServerWide.Context;
+using Raven.Server.ServerWide.Maintenance;
 using Sparrow.Json;
 using Sparrow.Json.Parsing;
 using Tests.Infrastructure;
 using Xunit;
-using Xunit.Sdk;
 
 namespace FastTests;
 
@@ -240,6 +237,26 @@ public partial class RavenTestBase
             WaitForValue(() => server.ServerStore.Observer != null, true);
 
             server.ServerStore.Observer.Suspended = true;
+        }
+
+        internal async Task<ClusterObserver.CompareExchangeTombstonesCleanupState> RunCompareExchangeTombstoneCleaner(RavenServer leader, bool simulateClusterTransactionIndex = true)
+        {
+            ClusterObserver.CompareExchangeTombstonesCleanupState state = ClusterObserver.CompareExchangeTombstonesCleanupState.InvalidDatabaseObservationState;
+            leader.ServerStore.ForTestingPurposesOnly().AfterCompareExchangeTombstonesResult = innerState =>
+            {
+                state = innerState;
+            };
+
+            // if we want the test to be completely organic, set the configuration of the server to MaxClusterTransactionCompareExchangeTombstoneCheckInterval = 0, and this flag to false
+            if (simulateClusterTransactionIndex)
+                leader.ServerStore.ForTestingPurposesOnly().IgnoreClusterTransactionIndexInCompareExchangeCleaner = true;
+
+            leader.ServerStore.Observer._lastTombstonesCleanupTimeInTicks = 0;  // this will trigger the cleaner to run immediately
+            
+            var cleanupTimeUpdated = await WaitForValueAsync(() => leader.ServerStore.Observer._lastTombstonesCleanupTimeInTicks > 0, true);
+            Assert.True(cleanupTimeUpdated);
+
+            return state;
         }
 
         internal async Task<(bool, Dictionary<string, long>)> GetNumberOfCommandsPerNode(long expectedNumberOfCommands, List<RavenServer> servers, string commandType, int timeout = 30_000, int interval = 1_000)

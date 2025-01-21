@@ -36,6 +36,10 @@ public class RavenDB_20206 : RavenTestBase
                 indexesList2.Add($"{i}", res2.Index);
             }
 
+            // incremental backup on store2 db so observer ob store2 won't delete its tombstones
+            var config = Backup.CreateBackupConfiguration("backupFolder", incrementalBackupFrequency: "0 0 1 * *");
+            var taskId = await Backup.UpdateConfigAndRunBackupAsync(server, config, store2, isFullBackup: false);
+
             // delete 1 unique value
             var del1 = await store1.Operations.SendAsync(new DeleteCompareExchangeValueOperation<int>("2", indexesList1["2"]));
             Assert.NotNull(del1.Value);
@@ -59,13 +63,8 @@ public class RavenDB_20206 : RavenTestBase
                 Assert.Equal(1, numOfCompareExchangeTombstones);
             }
 
-            using (server.ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
-            using (context.OpenReadTransaction())
-            {
-                // clean tombstones
-                var cleanupState = await CompareExchangeTombstoneCleanerTestHelper.Clean(context, store1.Database, server, true);
-                Assert.Equal(ClusterObserver.CompareExchangeTombstonesCleanupState.NoMoreTombstones, cleanupState);
-            }
+            // clean tombstones
+            await Cluster.RunCompareExchangeTombstoneCleaner(server, simulateClusterTransactionIndex: true);
 
             using (server.ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
             using (context.OpenReadTransaction())
@@ -81,14 +80,11 @@ public class RavenDB_20206 : RavenTestBase
                 Assert.Equal(2, numOfCompareExchanges);
             }
 
-            using (server.ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
-            using (context.OpenReadTransaction())
-            {
-                // clean tombstones
-                var cleanupState = await CompareExchangeTombstoneCleanerTestHelper.Clean(context, store2.Database, server, true);
-                Assert.Equal(ClusterObserver.CompareExchangeTombstonesCleanupState.NoMoreTombstones, cleanupState);
-            }
-
+            await Backup.RunBackupAsync(server, taskId, store2, isFullBackup: false);
+            
+            // clean tombstones
+            await Cluster.RunCompareExchangeTombstoneCleaner(server, simulateClusterTransactionIndex: true);
+            
             using (server.ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
             using (context.OpenReadTransaction())
             {

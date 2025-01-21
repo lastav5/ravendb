@@ -259,7 +259,7 @@ namespace SlowTests.Server.Documents.TimeSeries
                 await Backup.RunBackupInClusterAsync(store, taskId, isFullBackup: true);
                 await cleaner.ExecuteCleanup();
 
-                c = 0;
+                c = 0L;
                 using (storage.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context))
                 using (context.OpenReadTransaction())
                 {

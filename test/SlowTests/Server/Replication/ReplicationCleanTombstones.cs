@@ -93,6 +93,8 @@ namespace SlowTests.Server.Replication
                 var result = await store.Maintenance.SendAsync(new UpdatePeriodicBackupOperation(config));
 
                 Backup.WaitForResponsibleNodeUpdateInCluster(store, cluster.Nodes, result.TaskId);
+                var responsibleNode = Backup.GetBackupResponsibleNode(cluster.Leader, result.TaskId, database);
+                var responsibleServer = cluster.Nodes.First(x => x.ServerStore.NodeTag == responsibleNode);
 
                 using (var session = store.OpenSession())
                 {
@@ -120,18 +122,37 @@ namespace SlowTests.Server.Replication
                 Assert.True(await WaitForChangeVectorInClusterAsync(cluster.Nodes, database));
 
                 var total = 0L;
-                foreach (var server in cluster.Nodes)
+                
+                // responsible node will not delete tombstones before the backup happened
+                var storage = await responsibleServer.ServerStore.DatabasesLandlord.TryGetOrCreateResourceStore(store.Database);
+                await storage.TombstoneCleaner.ExecuteCleanup();
+                using (storage.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context))
+                using (context.OpenReadTransaction())
                 {
-                    var storage = await server.ServerStore.DatabasesLandlord.TryGetOrCreateResourceStore(store.Database);
-                    await storage.TombstoneCleaner.ExecuteCleanup();
-                    using (storage.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context))
-                    using (context.OpenReadTransaction())
-                    {
-                        total += storage.DocumentsStorage.GetNumberOfTombstones(context);
-                    }
+                    total += storage.DocumentsStorage.GetNumberOfTombstones(context);
                 }
+                
+                Assert.Equal(1, total);
 
-                Assert.Equal(3, total);
+                // non responsible nodes will delete their tombstones
+                await WaitForValueAsync(async () =>
+                {
+                    total = 0;
+                    foreach (var nonResServer in cluster.Nodes.Where(x => x.ServerStore.NodeTag != responsibleNode))
+                    {
+                        var nonResStorage = await nonResServer.ServerStore.DatabasesLandlord.TryGetOrCreateResourceStore(store.Database);
+                        await nonResStorage.TombstoneCleaner.ExecuteCleanup();
+                        using (nonResStorage.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context))
+                        using (context.OpenReadTransaction())
+                        {
+                            total += nonResStorage.DocumentsStorage.GetNumberOfTombstones(context);
+                        }
+                    }
+
+                    return total;
+                }, 0);
+                
+                Assert.Equal(0, total);
 
                 await Backup.RunBackupInClusterAsync(store, result.TaskId, isFullBackup: true);
                 await ActionWithLeader(async x => await Cluster.WaitForRaftCommandToBeAppliedInClusterAsync(x, nameof(UpdatePeriodicBackupStatusCommand)), cluster.Nodes);
@@ -139,16 +160,14 @@ namespace SlowTests.Server.Replication
                 var res = await WaitForValueAsync(async () =>
                 {
                     var c = 0L;
-                    foreach (var server in cluster.Nodes)
+                    
+                    await storage.TombstoneCleaner.ExecuteCleanup();
+                    using (storage.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context))
+                    using (context.OpenReadTransaction())
                     {
-                        var storage = await server.ServerStore.DatabasesLandlord.TryGetOrCreateResourceStore(store.Database);
-                        await storage.TombstoneCleaner.ExecuteCleanup();
-                        using (storage.DocumentsStorage.ContextPool.AllocateOperationContext(out DocumentsOperationContext context))
-                        using (context.OpenReadTransaction())
-                        {
-                            c += storage.DocumentsStorage.GetNumberOfTombstones(context);
-                        }
+                        c += storage.DocumentsStorage.GetNumberOfTombstones(context);
                     }
+                    
                     return c;
                 }, 0, interval: 333);
                 Assert.Equal(0, res);

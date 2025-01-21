@@ -27,6 +27,7 @@ using Sparrow.Logging;
 using Sparrow.Server.Utils;
 using Sparrow.Utils;
 using Constants = Raven.Client.Constants;
+using Exception = System.Exception;
 
 namespace Raven.Server.Documents.PeriodicBackup
 {
@@ -333,18 +334,20 @@ namespace Raven.Server.Documents.PeriodicBackup
                 _serverStore.ConcurrentBackupsCounter.StartBackup(periodicBackup.Configuration.Name, _logger);
 
                 var tcs = new TaskCompletionSource<IOperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-
+                
                 try
                 {
-                    var backupStatus = periodicBackup.BackupStatus = GetBackupStatus(periodicBackup.Configuration.TaskId, periodicBackup.BackupStatus);
+                    // in the case cluster backup status was overridden by a different node since our last backup,
+                    // we fetch the last local backup status to check if we need to continue where we left off or start fresh with a full backup
+                    
+                    var localBackupStatus = periodicBackup.BackupStatus = GetMostUpdatedLocalBackupStatus(periodicBackup.Configuration.TaskId, inMemoryBackupStatus: periodicBackup.BackupStatus);
                     var backupToLocalFolder = BackupConfiguration.CanBackupUsing(periodicBackup.Configuration.LocalSettings);
-
+                    
                     // check if we need to do a new full backup
-                    if (backupStatus.LastFullBackup == null || // no full backup was previously performed
-                        backupStatus.NodeTag != _serverStore.NodeTag || // last backup was performed by a different node
-                        backupStatus.BackupType != periodicBackup.Configuration.BackupType || // backup type has changed
-                        backupStatus.LastEtag == null || // last document etag wasn't updated
-                        backupToLocalFolder && BackupTask.DirectoryContainsBackupFiles(backupStatus.LocalBackup.BackupDirectory, IsFullBackupOrSnapshot) == false)
+                    if (localBackupStatus.LastFullBackup == null || // no full backup was previously performed
+                        localBackupStatus.BackupType != periodicBackup.Configuration.BackupType || // backup type has changed
+                        localBackupStatus.LastEtag == null || // last document etag wasn't updated
+                        backupToLocalFolder && BackupTask.DirectoryContainsBackupFiles(localBackupStatus.LocalBackup.BackupDirectory, IsFullBackupOrSnapshot) == false)
                     // the local folder already includes a full backup or snapshot
                     {
                         isFullBackup = true;
@@ -605,7 +608,7 @@ namespace Raven.Server.Documents.PeriodicBackup
             return taskStatus == TaskStatus.ActiveByCurrentNode;
         }
 
-        public PeriodicBackupStatus GetBackupStatus(long taskId)
+        public PeriodicBackupStatus GetMostUpdatedClusterBackupStatus(long taskId)
         {
             PeriodicBackupStatus inMemoryBackupStatus = null;
             if (_periodicBackups.TryGetValue(taskId, out PeriodicBackup periodicBackup))
@@ -613,29 +616,25 @@ namespace Raven.Server.Documents.PeriodicBackup
 
             if (_forTestingPurposes != null && _forTestingPurposes.BackupStatusFromMemoryOnly)
                 return inMemoryBackupStatus;
-            
-            return GetBackupStatus(taskId, inMemoryBackupStatus);
-        }
-        
-        private PeriodicBackupStatus GetBackupStatus(long taskId, PeriodicBackupStatus inMemoryBackupStatus)
-        {
-            var backupStatus = GetBackupStatusFromCluster(_serverStore, _database.Name, taskId);
-            return BackupUtils.ComparePeriodicBackupStatus(taskId, backupStatus, inMemoryBackupStatus);
-        }
 
-        private static PeriodicBackupStatus GetBackupStatusFromCluster(ServerStore serverStore, string databaseName, long taskId)
-        {
-            using (serverStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
+            using (_serverStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
             using (context.OpenReadTransaction())
             {
-                return BackupUtils.GetBackupStatusFromCluster(serverStore, context, databaseName, taskId);
+                var backupStatus = BackupUtils.GetBackupStatusFromCluster(_serverStore, context, _database.Name, taskId);
+                return BackupUtils.ComparePeriodicBackupStatus(taskId, backupStatus, inMemoryBackupStatus);
             }
         }
-
-        private long GetMinLastEtag()
+        
+        private PeriodicBackupStatus GetMostUpdatedLocalBackupStatus(long taskId, PeriodicBackupStatus inMemoryBackupStatus)
+        {
+            var backupStatus = BackupUtils.GetLocalBackupStatus(_serverStore, _database.Name, taskId);
+            return BackupUtils.ComparePeriodicBackupStatus(taskId, backupStatus, inMemoryBackupStatus);
+        }
+        
+        private long GetMinLastEtag(out HashSet<long> taskIdsStatusesToDelete)
         {
             var min = long.MaxValue;
-
+            taskIdsStatusesToDelete = null;
             using (_serverStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
             using (context.OpenReadTransaction())
             {
@@ -648,18 +647,61 @@ namespace Raven.Server.Documents.PeriodicBackup
                         // if there is no status for this, we don't need to take into account tombstones
                         continue; // if the backup is always full, we don't need to take into account the tombstones, since we never back them up.
                     }
-                    var status = BackupUtils.GetBackupStatusFromCluster(_serverStore, context, _database.Name, taskId);
-                    if (status == null)
+
+                    var localStatus = BackupUtils.GetLocalBackupStatus(_serverStore, context, _database.Name, taskId);
+                    
+                    // if we are not the responsible node, we want to avoid gathering tombstones indefinitely since our local status will not be updated
+                    var responsibleNode = BackupUtils.GetResponsibleNodeTag(_serverStore, _database.Name, taskId);
+
+                    if (localStatus == null)
                     {
-                        // if there is no status for this, we don't need to take into account tombstones
-                        return 0; // cannot delete the tombstones until we've done a full backup
+                        if (responsibleNode == null || responsibleNode == _serverStore.NodeTag)
+                        {
+                            // first backup might run on this node, don't delete anything until then
+                            return 0;
+                        }
+                        else
+                        {
+                            // we never ran the backup and aren't in the middle of it either
+                            // our next backup on this node is going to be full (first backup), so we can delete tombstones
+                            continue;
+                        }
                     }
-                    var etag = ChangeVectorUtils.GetEtagById(status.LastDatabaseChangeVector, _database.DbBase64Id);
+                    
+                    if (responsibleNode != null && responsibleNode != _serverStore.NodeTag && config.FullBackupFrequency != null)
+                    {
+                        var nextFullBackup = BackupUtils.GetNextBackupOccurrence(new BackupUtils.NextBackupOccurrenceParameters()
+                        {
+                            BackupFrequency = config.FullBackupFrequency,
+                            Configuration = config,
+                            LastBackupUtc = localStatus.LastFullBackupInternal ?? DateTime.MinValue
+                        });
+                        if (nextFullBackup == null)
+                        {
+                            // this is supposed to only happen if full frequency is null - shouldn't happen
+                            // let's not delete any tombstones
+                            return 0;
+                        }
+                        
+                        var now = DateTime.UtcNow;
+                        if (nextFullBackup.Value.ToUniversalTime() < now)
+                        {
+                            // we are overdue for a full backup, we can delete the local status to ensure the next backup will be full
+                            // this is in order to free the tombstone cleaners (for both local and compare exchange tombstones) to delete freely for this node
+
+                            taskIdsStatusesToDelete ??= new();
+                            taskIdsStatusesToDelete.Add(taskId);
+                            
+                            continue;
+                        }
+                    }
+
+                    var etag = ChangeVectorUtils.GetEtagById(localStatus.LastDatabaseChangeVector, _database.DbBase64Id);
                     min = Math.Min(etag, min);
                 }
-
-                return min;
             }
+
+            return min;
         }
 
         public void UpdateConfigurations(List<PeriodicBackupConfiguration> configurations)
@@ -739,8 +781,9 @@ namespace Raven.Server.Documents.PeriodicBackup
                     if (_logger.IsInfoEnabled)
                         _logger.Info($"New backup task '{taskId}' state is '{taskState}', will arrange a new backup timer.");
 
-                    var backupStatus = GetBackupStatus(taskId, inMemoryBackupStatus: null);
-                    periodicBackup.UpdateTimer(GetNextBackupDetails(newConfiguration, backupStatus, _serverStore.NodeTag), lockTaken: false);
+                    var backupStatus = GetMostUpdatedLocalBackupStatus(taskId, inMemoryBackupStatus: null);
+                    var nextbackup = GetNextBackupDetails(newConfiguration, backupStatus, _serverStore.NodeTag);
+                    periodicBackup.UpdateTimer(nextbackup, lockTaken: false);
                 }
 
                 return;
@@ -795,9 +838,11 @@ namespace Raven.Server.Documents.PeriodicBackup
 
                     if (_logger.IsOperationsEnabled)
                         _logger.Operations($"Backup task '{taskId}' state is '{taskState}', the task has frequency changes or doesn't have scheduled backup, the timer will be rearranged and the task will be executed by current node '{_database.ServerStore.NodeTag}'.");
-
-                    var backupStatus = GetBackupStatus(taskId, inMemoryBackupStatus: null);
-                    existingBackupState.UpdateTimer(GetNextBackupDetails(newConfiguration, backupStatus, _serverStore.NodeTag), lockTaken: false);
+                    
+                    var backupStatus = GetMostUpdatedLocalBackupStatus(taskId, inMemoryBackupStatus: null);
+                    var nextBackup = GetNextBackupDetails(newConfiguration, backupStatus, _serverStore.NodeTag);
+                    
+                    existingBackupState.UpdateTimer(nextBackup, lockTaken: false);
                     return;
 
                 default:
@@ -1012,7 +1057,13 @@ namespace Raven.Server.Documents.PeriodicBackup
 
         public Dictionary<string, long> GetLastProcessedTombstonesPerCollection(ITombstoneAware.TombstoneType tombstoneType)
         {
-            var minLastEtag = GetMinLastEtag();
+            var minLastEtag = GetMinLastEtag(out var taskIdsStatusesToDelete);
+
+            if (taskIdsStatusesToDelete != null && taskIdsStatusesToDelete.Count > 0)
+            {
+                if (_serverStore.DatabaseInfoCache.BackupStatusStorage.DeleteBackupStatusesByTaskIds(_database.Name, _serverStore._env.Base64Id, taskIdsStatusesToDelete) == false)
+                    minLastEtag = 0; // deleting the local status did not succeed. we can't remove any tombstones because it is not guaranteed next backup will be full.
+            }
 
             if (minLastEtag == long.MaxValue)
                 return null;

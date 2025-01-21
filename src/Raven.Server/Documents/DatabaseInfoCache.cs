@@ -1,6 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
+using Raven.Client.Documents.Operations.Backups;
+using Raven.Client.Json.Serialization;
+using Raven.Server.Documents.PeriodicBackup;
+using Raven.Server.ServerWide;
 using Raven.Server.ServerWide.Context;
 using Sparrow.Json;
 using Sparrow.Json.Parsing;
@@ -21,6 +26,8 @@ namespace Raven.Server.Documents
 
         private readonly TableSchema _databaseInfoSchema = new TableSchema();
 
+        public BackupStatusStorage BackupStatusStorage { get; }
+
         public DatabaseInfoCache()
         {
             Logger = LoggingSource.Instance.GetLogger<DatabaseInfoCache>("Server");
@@ -29,6 +36,8 @@ namespace Raven.Server.Documents
                 StartIndex = 0,
                 Count = 1
             });
+
+            BackupStatusStorage = new BackupStatusStorage();
         }
 
         public void Initialize(StorageEnvironment environment, TransactionContextPool contextPool)
@@ -43,6 +52,8 @@ namespace Raven.Server.Documents
 
                 tx.Commit();
             }
+
+            BackupStatusStorage.Initialize(_environment, _contextPool);
         }
 
         public unsafe void InsertDatabaseInfo(DynamicJsonValue databaseInfo, string databaseName)
