@@ -24,6 +24,7 @@ using Raven.Client.Exceptions.Database;
 using Raven.Client.Exceptions.Documents.Subscriptions;
 using Raven.Client.Exceptions.Security;
 using Raven.Client.Http;
+using Raven.Client.Json.Serialization;
 using Raven.Client.ServerWide;
 using Raven.Client.ServerWide.Commands;
 using Raven.Client.ServerWide.Operations.Certificates;
@@ -1509,6 +1510,7 @@ namespace Raven.Server.ServerWide
                         throw new DatabaseDoesNotExistException($"Cannot set typed value of type {type} for database {updateCommand.DatabaseName}, because it does not exist");
 
                     updateCommand.Execute(context, items, index, databaseRecord, _parent.CurrentState, out result);
+                    updateCommand.AfterExecute(index, databaseRecord, context, _parent.ServerStore);
                 }
             }
             catch (Exception e)
@@ -2698,7 +2700,7 @@ namespace Raven.Server.ServerWide
                         throw new RachisApplyException("Failed to update database record.", e);
                     }
 
-                    updateCommand.AfterDatabaseRecordUpdate(context, items, _clusterAuditLog);
+                    updateCommand.AfterDatabaseRecordUpdate(context, items, serverStore, _clusterAuditLog);
 
                     if (databaseRecord.Topology?.Count == 0 && databaseRecord.DeletionInProgress.Count == 0)
                     {
