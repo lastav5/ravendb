@@ -282,7 +282,7 @@ public abstract class AbstractOngoingTasks<TSubscriptionConnectionsState>
     protected abstract (string Url, OngoingTaskConnectionStatus Status) GetReplicationTaskConnectionStatus<T>(DatabaseTopology databaseTopology, ClusterTopology clusterTopology, T replication, Dictionary<string, RavenConnectionString> connectionStrings, out string responsibleNodeTag, out RavenConnectionString connection)
         where T : ExternalReplicationBase;
 
-    protected abstract PeriodicBackupStatus GetBackupStatus(long taskId, PeriodicBackupConfiguration backupConfiguration, out string responsibleNodeTag, out NextBackup nextBackup, out RunningBackup onGoingBackup, out bool isEncrypted);
+    protected abstract PeriodicBackupStatus GetClusterBackupStatus(long taskId, PeriodicBackupConfiguration backupConfiguration, out string responsibleNodeTag, out NextBackup nextBackup, out RunningBackup onGoingBackup, out bool isEncrypted);
 
     private OngoingTaskReplication CreateExternalReplicationTaskInfo(ClusterTopology clusterTopology, DatabaseRecord databaseRecord, ExternalReplication watcher)
     {
@@ -318,7 +318,7 @@ public abstract class AbstractOngoingTasks<TSubscriptionConnectionsState>
 
     private OngoingTaskBackup CreateBackupTaskInfo(ClusterTopology clusterTopology, PeriodicBackupConfiguration backupConfiguration)
     {
-        var backupStatus = GetBackupStatus(backupConfiguration.TaskId, backupConfiguration, out var responsibleNodeTag, out var nextBackup,
+        var backupStatus = GetClusterBackupStatus(backupConfiguration.TaskId, backupConfiguration, out var responsibleNodeTag, out var nextBackup,
             out var onGoingBackup, out var isEncrypted);
         var backupDestinations = backupConfiguration.GetFullBackupDestinations();
 

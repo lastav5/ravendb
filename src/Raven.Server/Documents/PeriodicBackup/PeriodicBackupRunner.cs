@@ -631,7 +631,7 @@ namespace Raven.Server.Documents.PeriodicBackup
             if (_forTestingPurposes != null && _forTestingPurposes.BackupStatusFromMemoryOnly)
                 return inMemoryBackupStatus;
 
-            using (_serverStore.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
+            using (_serverStore.Engine.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
             using (context.OpenReadTransaction())
             {
                 var backupStatus = BackupUtils.GetBackupStatusFromCluster(_serverStore, context, _database.Name, taskId);
@@ -649,7 +649,7 @@ namespace Raven.Server.Documents.PeriodicBackup
         {
             var min = long.MaxValue;
             taskIdsStatusesToDelete = null;
-            using (_serverStore.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
+            using (_serverStore.Engine.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
             using (context.OpenReadTransaction())
             {
                 var record = _serverStore.Cluster.ReadRawDatabaseRecord(context, _database.Name);

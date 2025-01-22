@@ -639,56 +639,8 @@ namespace Raven.Server.ServerWide.Maintenance
             maxEtag = -1;
             long minClusterWideTransactionIndex = -1;
 
-            var periodicBackupTaskIds = mergedState.RawDatabase.PeriodicBackupsTaskIds;
-            var isSharded = mergedState.RawDatabase.IsSharded;
-
             foreach (var (shardNumber, state) in mergedState.States)
             {
-                //if sharded, we have to get backup status by shard name
-                var shardName = isSharded ? ShardHelper.ToShardName(databaseName, shardNumber) : databaseName;
-
-                if (periodicBackupTaskIds != null && periodicBackupTaskIds.Count > 0)
-                {
-                    foreach (var taskId in periodicBackupTaskIds)
-                    {
-                        var singleBackupStatus = _server.Cluster.Read(context, PeriodicBackupStatus.GenerateItemName(shardName, taskId));
-                        if (singleBackupStatus == null)
-                            continue;
-
-                        if (singleBackupStatus.TryGet(nameof(PeriodicBackupStatus.LastFullBackupInternal), out DateTime? lastFullBackupInternal) == false ||
-                            lastFullBackupInternal == null)
-                        {
-                            // never backed up yet
-                            if (singleBackupStatus.TryGet(nameof(PeriodicBackupStatus.LastIncrementalBackupInternal), out DateTime? lastIncrementalBackupInternal) ==
-                                false || lastIncrementalBackupInternal == null)
-                                continue;
-                        }
-
-                        if (singleBackupStatus.TryGet(nameof(PeriodicBackupStatus.LastRaftIndex), out BlittableJsonReaderObject lastRaftIndexBlittable) == false ||
-                            lastRaftIndexBlittable == null)
-                        {
-                            if (singleBackupStatus.TryGet(nameof(PeriodicBackupStatus.Error), out BlittableJsonReaderObject error) == false || error != null)
-                            {
-                                // backup errored on first run (lastRaftIndex == null) => cannot remove ANY tombstones
-                                return CompareExchangeTombstonesCleanupState.InvalidPeriodicBackupStatus;
-                            }
-
-                            continue;
-                        }
-
-                        if (lastRaftIndexBlittable.TryGet(nameof(PeriodicBackupStatus.LastEtag), out long? lastRaftIndex) == false || lastRaftIndex == null)
-                        {
-                            continue;
-                        }
-
-                        if (maxEtag == -1 || lastRaftIndex < maxEtag)
-                            maxEtag = lastRaftIndex.Value;
-
-                        if (maxEtag == 0)
-                            return CompareExchangeTombstonesCleanupState.NoMoreTombstones;
-                    }
-                }
-
                 // we are checking this here, not in the main loop, to avoid returning 'NoMoreTombstones' when maxEtag is 0
                 foreach (var nodeTag in state.DatabaseTopology.AllNodes)
                 {
@@ -699,7 +651,9 @@ namespace Raven.Server.ServerWide.Maintenance
                 foreach (var nodeTag in state.DatabaseTopology.AllNodes)
                 {
                     var hasState = state.Current.TryGetValue(nodeTag, out var nodeReport);
+
                     Debug.Assert(hasState, $"Could not find state for node '{nodeTag}' for database '{state.Name}'.");
+
                     // ReSharper disable once ConditionIsAlwaysTrueOrFalse
                     if (hasState == false)
                         return CompareExchangeTombstonesCleanupState.InvalidDatabaseObservationState;
@@ -710,9 +664,66 @@ namespace Raven.Server.ServerWide.Maintenance
                     if (hasReport == false)
                         return CompareExchangeTombstonesCleanupState.InvalidDatabaseObservationState;
 
+                    //Debug.Assert(EnumerableExtension.ElementsEqual(periodicBackupTaskIds, report.BackupStatuses.Select(x => x.Value.TaskId ?? -1).ToList()));
+
+                    if (report.BackupStatuses == null)
+                    {
+                        // the node wasn't updated to a version that supports it
+                        return CompareExchangeTombstonesCleanupState.InvalidPeriodicBackupStatus;
+                    }
+
+                    foreach (var (taskId, status) in report.BackupStatuses)
+                    {
+                        if (status == null)
+                            continue;
+
+                        var lastFullBackupInternal = status.LastFullBackupInternal;
+                        if (lastFullBackupInternal == null)
+                        {
+                            // never backed up yet
+                            if (status.LastIncrementalBackupInternal == null)
+                                continue;
+                        }
+
+                        var backupConfiguration = state.RawDatabase.GetPeriodicBackupConfiguration(taskId);
+
+                        if (backupConfiguration == null)
+                            return CompareExchangeTombstonesCleanupState.InvalidDatabaseObservationState;
+
+                        if (backupConfiguration.FullBackupFrequency == null)
+                            if (backupConfiguration.IncrementalBackupFrequency == null)
+                                continue; // not valid but possible, we treat it the same as if there is no backup at all
+                            else
+                                return CompareExchangeTombstonesCleanupState.NoMoreTombstones; // we only run incremental backups - never delete tombstones
+
+                        if (status.LastRaftIndex == null)
+                        {
+                            if (status.Error)
+                            {
+                                // backup errored on first run (lastRaftIndex == null) => cannot remove ANY tombstones
+                                return CompareExchangeTombstonesCleanupState.InvalidPeriodicBackupStatus;
+                            }
+
+                            continue;
+                        }
+
+                        var lastRaftIndex = status.LastRaftIndex.LastEtag;
+                        if (lastRaftIndex == null)
+                        {
+                            continue;
+                        }
+
+                        if (maxEtag == -1 || lastRaftIndex < maxEtag)
+                            maxEtag = lastRaftIndex.Value;
+
+                        // there can't be a lower etag, we can stop checking here
+                        if (maxEtag == 0)
+                            return CompareExchangeTombstonesCleanupState.NoMoreTombstones;
+                    }
+
                     var clusterWideTransactionIndex = report.LastClusterWideTransactionRaftIndex;
-                    if (maxEtag == -1 || clusterWideTransactionIndex < maxEtag)
-                        maxEtag = clusterWideTransactionIndex;
+                    if (minClusterWideTransactionIndex == -1 || clusterWideTransactionIndex < minClusterWideTransactionIndex)
+                        minClusterWideTransactionIndex = clusterWideTransactionIndex;
 
                     foreach (var kvp in report.LastIndexStats)
                     {
@@ -720,10 +731,10 @@ namespace Raven.Server.ServerWide.Maintenance
                         if (lastIndexedCompareExchangeReferenceTombstoneEtag == null)
                             continue;
 
-                        if (maxEtag == -1 || lastIndexedCompareExchangeReferenceTombstoneEtag < maxEtag)
-                            maxEtag = lastIndexedCompareExchangeReferenceTombstoneEtag.Value;
+                        if (minClusterWideTransactionIndex == -1 || lastIndexedCompareExchangeReferenceTombstoneEtag < minClusterWideTransactionIndex)
+                            minClusterWideTransactionIndex = lastIndexedCompareExchangeReferenceTombstoneEtag.Value;
 
-                        if (maxEtag == 0)
+                        if (minClusterWideTransactionIndex == 0)
                             return CompareExchangeTombstonesCleanupState.NoMoreTombstones;
                     }
                 }
