@@ -573,7 +573,7 @@ namespace Raven.Server.ServerWide.Maintenance
             InvalidPeriodicBackupStatus,
             NoMoreTombstones
         }
-
+        //TODO stav: backwards compatibility of report between 5.4 without backup status and 5.4 with - test
         private CompareExchangeTombstonesCleanupState GetMaxCompareExchangeTombstonesEtagToDelete(DatabaseObservationState state, out long maxEtag)
         {
             maxEtag = -1;
@@ -601,6 +601,12 @@ namespace Raven.Server.ServerWide.Maintenance
                 // ReSharper disable once ConditionIsAlwaysTrueOrFalse
                 if (hasReport == false)
                     return CompareExchangeTombstonesCleanupState.InvalidDatabaseObservationState;
+
+                if (report.BackupStatuses == null)
+                {
+                    // the node wasn't updated to a version that supports it
+                    return CompareExchangeTombstonesCleanupState.InvalidPeriodicBackupStatus;
+                }
 
                 foreach (var (taskId, status) in report.BackupStatuses)
                 {
