@@ -664,8 +664,6 @@ namespace Raven.Server.ServerWide.Maintenance
                     if (hasReport == false)
                         return CompareExchangeTombstonesCleanupState.InvalidDatabaseObservationState;
 
-                    //Debug.Assert(EnumerableExtension.ElementsEqual(periodicBackupTaskIds, report.BackupStatuses.Select(x => x.Value.TaskId ?? -1).ToList()));
-
                     if (report.BackupStatuses == null)
                     {
                         // the node wasn't updated to a version that supports it
