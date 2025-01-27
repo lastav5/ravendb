@@ -1061,8 +1061,26 @@ namespace Raven.Server.Documents.PeriodicBackup
 
             if (taskIdsStatusesToDelete != null && taskIdsStatusesToDelete.Count > 0)
             {
-                if (_serverStore.DatabaseInfoCache.BackupStatusStorage.DeleteBackupStatusesByTaskIds(_database.Name, _serverStore._env.Base64Id, taskIdsStatusesToDelete) == false)
-                    minLastEtag = 0; // deleting the local status did not succeed. we can't remove any tombstones because it is not guaranteed next backup will be full.
+                try
+                {
+                    if (_serverStore.DatabaseInfoCache.BackupStatusStorage.DeleteBackupStatusesByTaskIds(_database.Name, _serverStore._env.Base64Id, taskIdsStatusesToDelete) == false)
+                        minLastEtag = 0; // deleting the local status did not succeed. we can't remove any tombstones because it is not guaranteed next backup will be full.
+                    else
+                    {
+                        if (_logger.IsInfoEnabled)
+                            _logger.Info(
+                                $"{_database.Name}: Deleted local backup statuses for the following ids [{string.Join(",", taskIdsStatusesToDelete)}], because node with db id {_serverStore._env.Base64Id} is not responsible anymore and is overdue for a full backup.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    minLastEtag = 0;
+
+                    if (_logger.IsInfoEnabled)
+                        _logger.Info(
+                        $"{_database.Name}: Could not delete the local backup statuses for the following ids [{string.Join(",", taskIdsStatusesToDelete)}]. We will not remove any tombstones.",
+                        ex);
+                }
             }
 
             if (minLastEtag == long.MaxValue)
