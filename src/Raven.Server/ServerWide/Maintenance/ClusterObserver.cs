@@ -634,7 +634,7 @@ namespace Raven.Server.ServerWide.Maintenance
             NoMoreTombstones
         }
 
-        private CompareExchangeTombstonesCleanupState GetMaxCompareExchangeTombstonesEtagToDelete<TRavenTransaction>(TransactionOperationContext<TRavenTransaction> context, string databaseName, MergedDatabaseObservationState mergedState, out long maxEtag) where TRavenTransaction : RavenTransaction
+        private CompareExchangeTombstonesCleanupState GetMaxCompareExchangeTombstonesEtagToDelete(ClusterOperationContext context, string databaseName, MergedDatabaseObservationState mergedState, out long maxEtag)
         {
             maxEtag = -1;
             long minClusterWideTransactionIndex = -1;
@@ -720,6 +720,10 @@ namespace Raven.Server.ServerWide.Maintenance
                     }
 
                     var clusterWideTransactionIndex = report.LastClusterWideTransactionRaftIndex;
+
+                    if (_server.ForTestingPurposes?.IgnoreClusterTransactionIndexInCompareExchangeCleaner == true)
+                        clusterWideTransactionIndex = long.MaxValue;
+
                     if (minClusterWideTransactionIndex == -1 || clusterWideTransactionIndex < minClusterWideTransactionIndex)
                         minClusterWideTransactionIndex = clusterWideTransactionIndex;
 
