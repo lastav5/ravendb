@@ -1751,7 +1751,7 @@ namespace SlowTests.Server.Documents.PeriodicBackup
         }
 
         [Fact, Trait("Category", "Smuggler")]
-        public async Task ShouldClearAllCompareExchangeTombstonesIfThereIsABackupThatNeverOccur()
+        public async Task ShouldNotDeleteCompareExchangeTombstonesIfThereIsABackupThatNeverOccur()
         {
             using (var server = GetNewServer())
             using (var store = GetDocumentStore(new Options { Server = server }))
@@ -1793,7 +1793,7 @@ namespace SlowTests.Server.Documents.PeriodicBackup
                 {
                     var numOfCompareExchangeTombstones = server.ServerStore.Cluster.GetNumberOfCompareExchangeTombstones(context, store.Database);
                     var numOfCompareExchanges = server.ServerStore.Cluster.GetNumberOfCompareExchange(context, store.Database);
-                    Assert.Equal(0, numOfCompareExchangeTombstones);
+                    Assert.Equal(1, numOfCompareExchangeTombstones);
                     Assert.Equal(2, numOfCompareExchanges);
                 }
             }

@@ -94,7 +94,7 @@ namespace Raven.Server.ServerWide.Maintenance
         }
 
         public bool Suspended = false; // don't really care about concurrency here
-        internal long _iteration;
+        private long _iteration;
         private readonly long _term;
         private long _lastIndexCleanupTimeInTicks;
         internal long _lastTombstonesCleanupTimeInTicks;
@@ -638,9 +638,12 @@ namespace Raven.Server.ServerWide.Maintenance
         {
             maxEtag = -1;
             long minClusterWideTransactionIndex = -1;
+            var isSharded = mergedState.RawDatabase.IsSharded;
 
             foreach (var (shardNumber, state) in mergedState.States)
             {
+                var shardName = isSharded ? ShardHelper.ToShardName(databaseName, shardNumber) : databaseName;
+
                 // we are checking this here, not in the main loop, to avoid returning 'NoMoreTombstones' when maxEtag is 0
                 foreach (var nodeTag in state.DatabaseTopology.AllNodes)
                 {
@@ -669,11 +672,20 @@ namespace Raven.Server.ServerWide.Maintenance
                         // the node wasn't updated to a version that supports it
                         return CompareExchangeTombstonesCleanupState.InvalidPeriodicBackupStatus;
                     }
-
+                    
                     foreach (var (taskId, status) in report.BackupStatuses)
                     {
                         if (status == null)
+                        {
+                            var clusterStatus = BackupUtils.GetBackupStatusFromClusterBlittable(_server, context, shardName, taskId);
+                            if (clusterStatus == null)
+                            {
+                                // existing backup hasn't run yet for the first time, we don't want to delete anything until we have a first status
+                                return 0;
+                            }
+
                             continue;
+                        }
 
                         var lastFullBackupInternal = status.LastFullBackupInternal;
                         if (lastFullBackupInternal == null)
